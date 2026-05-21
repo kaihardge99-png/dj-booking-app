@@ -1,0 +1,11 @@
+node_modules/
+.env
+.DS_Store
+.parcel-cache/
+bookings.db
+bookings.db-shm
+bookings.db-wal
+server.log
+ngrok.log
+public/bundle.js
+public/bundle.css

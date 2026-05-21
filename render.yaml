@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: dj-booking-app
+    env: node
+    plan: free
+    branch: main
+    buildCommand: "npm run build"
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+# Note: You still need to connect this repository to Render (via GitHub or GitLab)
+# and create the service from the Render dashboard, or use the Render API.

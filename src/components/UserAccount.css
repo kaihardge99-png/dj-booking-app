@@ -1,0 +1,365 @@
+.user-account-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  background-color: #ffffff;
+  min-height: 100vh;
+}
+
+.account-header {
+  text-align: center;
+  margin-bottom: 40px;
+  border-bottom: 2px solid #000000;
+  padding-bottom: 20px;
+}
+
+.account-header h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: #000000;
+  margin: 0 0 10px 0;
+}
+
+.username-display {
+  font-size: 16px;
+  color: #666666;
+  margin: 0;
+}
+
+.account-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.tab-btn {
+  padding: 12px 24px;
+  background-color: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-size: 16px;
+  font-weight: 600;
+  color: #666666;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.tab-btn:hover {
+  color: #000000;
+}
+
+.tab-btn.active {
+  color: #000000;
+  border-bottom-color: #000000;
+}
+
+.account-content {
+  margin-bottom: 40px;
+}
+
+/* Bookings Section */
+.bookings-section h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #000000;
+  margin-bottom: 20px;
+}
+
+.no-bookings {
+  text-align: center;
+  color: #999999;
+  font-size: 16px;
+  padding: 40px 20px;
+}
+
+.bookings-list {
+  display: grid;
+  gap: 20px;
+}
+
+.booking-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  background-color: #f9f9f9;
+  transition: box-shadow 0.3s ease;
+}
+
+.booking-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.booking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.booking-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #000000;
+  margin: 0;
+}
+
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background-color: #e0e0e0;
+  color: #000000;
+}
+
+.status-badge.confirmed {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge.pending {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.cancelled {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.booking-details {
+  display: grid;
+  gap: 10px;
+}
+
+.booking-details p {
+  margin: 0;
+  font-size: 14px;
+  color: #333333;
+}
+
+.booking-details strong {
+  color: #000000;
+}
+
+/* Profile Section */
+.profile-section h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #000000;
+  margin-bottom: 20px;
+}
+
+.success-message {
+  background-color: #d4edda;
+  color: #155724;
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.error-message {
+  background-color: #f8d7da;
+  color: #721c24;
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.profile-view {
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.profile-info {
+  margin-bottom: 20px;
+}
+
+.profile-info p {
+  font-size: 16px;
+  color: #333333;
+  margin: 10px 0;
+}
+
+.profile-info strong {
+  color: #000000;
+}
+
+.edit-btn {
+  padding: 10px 20px;
+  background-color: #000000;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.edit-btn:hover {
+  background-color: #333333;
+}
+
+.profile-form {
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+  margin-bottom: 8px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.3s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #000000;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.form-group input:disabled {
+  background-color: #e8e8e8;
+  color: #999999;
+  cursor: not-allowed;
+}
+
+.form-group small {
+  display: block;
+  font-size: 12px;
+  color: #999999;
+  margin-top: 4px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.save-btn,
+.cancel-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.save-btn {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.save-btn:hover:not(:disabled) {
+  background-color: #333333;
+}
+
+.save-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.cancel-btn {
+  background-color: #e0e0e0;
+  color: #000000;
+}
+
+.cancel-btn:hover {
+  background-color: #d0d0d0;
+}
+
+/* Account Footer */
+.account-footer {
+  text-align: center;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.logout-btn {
+  padding: 10px 30px;
+  background-color: #ffffff;
+  color: #000000;
+  border: 2px solid #000000;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.logout-btn:hover {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .user-account-container {
+    padding: 20px 15px;
+  }
+
+  .account-header h1 {
+    font-size: 24px;
+  }
+
+  .account-tabs {
+    flex-direction: column;
+  }
+
+  .tab-btn {
+    text-align: left;
+    border-bottom: none;
+    border-left: 3px solid transparent;
+    padding: 12px 16px;
+  }
+
+  .tab-btn.active {
+    border-left-color: #000000;
+    border-bottom: none;
+  }
+
+  .booking-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .save-btn,
+  .cancel-btn {
+    width: 100%;
+  }
+}

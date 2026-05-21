@@ -1,0 +1,37 @@
+{
+  "name": "dj-booking-app",
+  "version": "1.0.0",
+  "description": "DJ Practice Session Booking App for AllFriends AV",
+  "main": "server.js",
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --outfile=public/bundle.js --loader:.js=jsx --platform=browser",
+    "start": "npm run build && node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "booking",
+    "dj",
+    "practice"
+  ],
+  "author": "AllFriends AV",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.16.1",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^8.0.7",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "^7.15.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "esbuild": "^0.28.0",
+    "parcel": "^2.16.4",
+    "vite": "^8.0.13"
+  }
+}
