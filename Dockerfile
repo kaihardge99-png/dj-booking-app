@@ -2,6 +2,9 @@ FROM node:18-alpine
 
 WORKDIR /usr/src/app
 
+# Install build tools needed for better-sqlite3 compilation
+RUN apk add --no-cache python3 make g++
+
 # Install dependencies (including dev deps for build), then build and prune dev deps
 COPY package.json package-lock.json* ./
 RUN npm install
