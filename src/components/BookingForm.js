@@ -37,6 +37,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
   const [submitError, setSubmitError] = useState('');
   const [totalPrice, setTotalPrice] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [availabilityVersion, setAvailabilityVersion] = useState(0);
 
   useEffect(() => {
     calculatePrice();
@@ -165,6 +166,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       start_time: '',
       end_time: '',
     });
+    setAvailabilityVersion((prev) => prev + 1);
   };
 
   const handleTimeSelect = (time) => {
@@ -217,6 +219,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       if (response.ok) {
         setSubmitted(true);
         setSubmitError('');
+        setAvailabilityVersion((prev) => prev + 1);
         setFormData({
           user_name: '',
           user_email: '',
@@ -259,6 +262,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
         selectedDate={formData.booking_date}
         selectedTime={formData.start_time}
         selectedEndTime={formData.end_time}
+        availabilityVersion={availabilityVersion}
       />
 
       {/* Booking Form */}

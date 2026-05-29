@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import './Calendar.css';
 
-function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, selectedDate, selectedTime, selectedEndTime }) {
+function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, selectedDate, selectedTime, selectedEndTime, availabilityVersion }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [availableTimes, setAvailableTimes] = useState([]);
+  const [apiUnavailableDates, setApiUnavailableDates] = useState([]);
+  const [apiSlotsByDate, setApiSlotsByDate] = useState({});
 
   const OPERATING_HOURS = {
     0: null, // Sunday - closed
@@ -15,10 +17,34 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
     6: { open: 10, close: 17 }, // Saturday
   };
 
+  useEffect(() => {
+    const fetchAvailability = async () => {
+      try {
+        const month = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+        const response = await fetch(`/api/availability?month=${month}`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        setApiUnavailableDates(data.unavailableDates || []);
+        setApiSlotsByDate(data.slotsByDate || {});
+      } catch (error) {
+        console.error('Error fetching availability:', error);
+      }
+    };
+
+    fetchAvailability();
+  }, [currentMonth, availabilityVersion]);
+
   // Generate available time slots
   useEffect(() => {
     if (!selectedDate) {
       setAvailableTimes([]);
+      return;
+    }
+
+    const apiSlots = apiSlotsByDate[selectedDate];
+    if (Array.isArray(apiSlots)) {
+      setAvailableTimes(apiSlots);
       return;
     }
 
@@ -36,7 +62,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
       times.push(`${hour.toString().padStart(2, '0')}:00`);
     }
     setAvailableTimes(times);
-  }, [selectedDate]);
+  }, [selectedDate, apiSlotsByDate]);
+
 
   const getDaysInMonth = (date) => {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -48,7 +75,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
 
   const isDateBlocked = (day) => {
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return blockedDates.includes(dateStr);
+    return blockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr);
   };
 
   const isDateClosed = (day) => {

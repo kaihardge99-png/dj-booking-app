@@ -5,12 +5,18 @@ const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const axios = require('axios');
+const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
+const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -201,6 +207,235 @@ const OPERATING_HOURS = {
   4: { open: 10, close: 22 }, // Thursday
   5: { open: 10, close: 22 }, // Friday
   6: { open: 10, close: 17 }, // Saturday
+};
+
+const toMinutes = (time) => {
+  if (!time || typeof time !== 'string') return null;
+  const [hour, minute] = time.split(':').map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  return hour * 60 + minute;
+};
+
+const toTimeString = (minutes) => {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+const overlap = (startA, endA, startB, endB) => startA < endB && endA > startB;
+
+const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleEvents) => {
+  const day = new Date(date).getDay();
+  const hours = OPERATING_HOURS[day];
+
+  if (!hours) {
+    return { slots: [], isUnavailable: true };
+  }
+
+  if (blockedDatesRows.some((row) => row.date === date)) {
+    return { slots: [], isUnavailable: true };
+  }
+
+  const openMinutes = hours.open * 60;
+  const closeMinutes = hours.close * 60;
+
+  const googleBusy = googleEvents
+    .map((event) => {
+      if (event.start?.date && event.end?.date) {
+        return { start: 0, end: 24 * 60 };
+      }
+
+      const start = new Date(event.start?.dateTime || event.start?.date);
+      const end = new Date(event.end?.dateTime || event.end?.date);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+      }
+      const startMinutes = start.getHours() * 60 + start.getMinutes();
+      const endMinutes = end.getHours() * 60 + end.getMinutes();
+      return {
+        start: startMinutes,
+        end: endMinutes,
+      };
+    })
+    .filter(Boolean);
+
+  const bookingBusy = bookingRows
+    .map((row) => {
+      const start = toMinutes(row.start_time);
+      const end = toMinutes(row.end_time);
+      if (start === null || end === null) return null;
+      return { start, end };
+    })
+    .filter(Boolean);
+
+  const busyRanges = [...googleBusy, ...bookingBusy];
+
+  const slots = [];
+  for (let slotStart = openMinutes; slotStart < closeMinutes; slotStart += 60) {
+    const slotEnd = slotStart + 60;
+    if (slotEnd > closeMinutes) continue;
+
+    const blocked = busyRanges.some((range) => overlap(slotStart, slotEnd, range.start, range.end));
+    if (!blocked) {
+      slots.push(toTimeString(slotStart));
+    }
+  }
+
+  return {
+    slots,
+    isUnavailable: slots.length === 0,
+  };
+};
+
+const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
+  if (!GOOGLE_CALENDAR_ID && !GOOGLE_CALENDAR_ICS_URL) return [];
+
+  try {
+    if (GOOGLE_SERVICE_ACCOUNT_JSON && GOOGLE_CALENDAR_ID) {
+      const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+      });
+      const calendar = google.calendar({ version: 'v3', auth });
+      const response = await calendar.events.list({
+        calendarId: GOOGLE_CALENDAR_ID,
+        singleEvents: true,
+        orderBy: 'startTime',
+        timeMin,
+        timeMax,
+        maxResults: 2500,
+      });
+      return response.data.items || [];
+    }
+
+    if (GOOGLE_API_KEY && GOOGLE_CALENDAR_ID) {
+      const response = await axios.get(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID)}/events`, {
+        params: {
+          key: GOOGLE_API_KEY,
+          singleEvents: true,
+          orderBy: 'startTime',
+          timeMin,
+          timeMax,
+          maxResults: 2500,
+        },
+      });
+
+      return response.data.items || [];
+    }
+
+    if (GOOGLE_CALENDAR_ICS_URL) {
+      const response = await axios.get(GOOGLE_CALENDAR_ICS_URL);
+      return parseIcsEvents(response.data || '');
+    }
+
+    return [];
+  } catch (error) {
+    console.error('Google Calendar fetch error:', error.message);
+    return [];
+  }
+};
+
+const filterEventsForDate = (date, events) => {
+  const dayStart = new Date(`${date}T00:00:00`);
+  const dayEnd = new Date(`${date}T23:59:59`);
+
+  return events.filter((event) => {
+    const eventStart = new Date(event.start?.dateTime || event.start?.date);
+    const eventEnd = new Date(event.end?.dateTime || event.end?.date);
+
+    if (Number.isNaN(eventStart.getTime()) || Number.isNaN(eventEnd.getTime())) {
+      return false;
+    }
+
+    return eventStart <= dayEnd && eventEnd >= dayStart;
+  });
+};
+
+const parseIcsDate = (value) => {
+  if (!value) return null;
+  if (/^\d{8}T\d{6}Z$/.test(value)) {
+    const year = value.slice(0, 4);
+    const month = value.slice(4, 6);
+    const day = value.slice(6, 8);
+    const hour = value.slice(9, 11);
+    const minute = value.slice(11, 13);
+    const second = value.slice(13, 15);
+    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+  }
+
+  if (/^\d{8}T\d{6}$/.test(value)) {
+    const year = value.slice(0, 4);
+    const month = value.slice(4, 6);
+    const day = value.slice(6, 8);
+    const hour = value.slice(9, 11);
+    const minute = value.slice(11, 13);
+    const second = value.slice(13, 15);
+    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+  }
+
+  if (/^\d{8}$/.test(value)) {
+    const year = value.slice(0, 4);
+    const month = value.slice(4, 6);
+    const day = value.slice(6, 8);
+    return new Date(`${year}-${month}-${day}T00:00:00`);
+  }
+
+  return null;
+};
+
+const parseIcsEvents = (icsText) => {
+  const lines = icsText.replace(/\r\n/g, '\n').split('\n');
+  const events = [];
+  let event = null;
+
+  lines.forEach((line) => {
+    if (line.startsWith('BEGIN:VEVENT')) {
+      event = {};
+      return;
+    }
+
+    if (line.startsWith('END:VEVENT')) {
+      if (event?.start && event?.end) {
+        events.push({
+          start: event.start,
+          end: event.end,
+        });
+      }
+      event = null;
+      return;
+    }
+
+    if (!event) return;
+
+    const [rawKey, rawValue] = line.split(':');
+    if (!rawKey || !rawValue) return;
+
+    const key = rawKey.split(';')[0];
+    if (key === 'DTSTART') {
+      const date = parseIcsDate(rawValue.trim());
+      if (date) {
+        if (/^\d{8}$/.test(rawValue.trim())) {
+          event.start = { date: date.toISOString().slice(0, 10) };
+        } else {
+          event.start = { dateTime: date.toISOString() };
+        }
+      }
+    }
+
+    if (key === 'DTEND') {
+      const date = parseIcsDate(rawValue.trim());
+      if (date) {
+        if (/^\d{8}$/.test(rawValue.trim())) {
+          event.end = { date: date.toISOString().slice(0, 10) };
+        } else {
+          event.end = { dateTime: date.toISOString() };
+        }
+      }
+    }
+  });
+
+  return events;
 };
 
 // Pricing
@@ -605,6 +840,64 @@ app.get('/api/blocked-dates', async (req, res) => {
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/availability', async (req, res) => {
+  try {
+    const { month } = req.query;
+
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month query is required in YYYY-MM format' });
+    }
+
+    const [yearStr, monthStr] = month.split('-');
+    const year = Number(yearStr);
+    const monthIndex = Number(monthStr) - 1;
+
+    const firstDay = new Date(year, monthIndex, 1);
+    const lastDay = new Date(year, monthIndex + 1, 0);
+
+    const startDate = `${yearStr}-${monthStr}-01`;
+    const endDate = `${yearStr}-${monthStr}-${String(lastDay.getDate()).padStart(2, '0')}`;
+
+    const blockedStmt = db.prepare('SELECT date FROM blocked_dates WHERE date >= ? AND date <= ?');
+    const blockedRows = await blockedStmt.all(startDate, endDate);
+
+    const bookingsStmt = db.prepare('SELECT booking_date, start_time, end_time, status FROM bookings WHERE booking_date >= ? AND booking_date <= ?');
+    const bookingRows = await bookingsStmt.all(startDate, endDate);
+
+    const activeBookingRows = bookingRows.filter((row) => row.status !== 'cancelled');
+    const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
+    const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
+    const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+
+    const unavailableDates = [];
+    const slotsByDate = {};
+
+    for (let day = 1; day <= lastDay.getDate(); day += 1) {
+      const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
+      const dayBookings = activeBookingRows.filter((row) => row.booking_date === date);
+      const dayEvents = filterEventsForDate(date, googleEvents);
+      const availability = await listDateAvailability(date, blockedRows, dayBookings, dayEvents);
+
+      slotsByDate[date] = availability.slots;
+      if (availability.isUnavailable) {
+        unavailableDates.push(date);
+      }
+    }
+
+    return res.json({
+      month,
+      unavailableDates,
+      slotsByDate,
+      source: {
+        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL),
+        authMode: GOOGLE_SERVICE_ACCOUNT_JSON ? 'adc_service_account' : GOOGLE_API_KEY ? 'api_key' : GOOGLE_CALENDAR_ICS_URL ? 'ics_url' : 'none',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 });
 

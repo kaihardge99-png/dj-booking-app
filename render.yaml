@@ -17,6 +17,14 @@ services:
         fromDatabase:
           name: dj-booking-db-kai99
           property: connectionString
+      - key: GOOGLE_CALENDAR_ID
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_CALENDAR_ICS_URL
+        sync: false
 
 databases:
   - name: dj-booking-db-kai99
