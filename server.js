@@ -51,13 +51,29 @@ const createPostgresDb = () => {
     ssl: isProd ? { rejectUnauthorized: false } : false,
   });
 
+  const normalizePlaceholders = (sql) => {
+    let index = 0;
+    return sql.replace(/\?/g, () => {
+      index += 1;
+      return `$${index}`;
+    });
+  };
+
+  const appendReturningId = (sql) => {
+    const trimmed = sql.trim();
+    if (trimmed.endsWith(';')) {
+      return `${trimmed.slice(0, -1)} RETURNING id;`;
+    }
+    return `${trimmed} RETURNING id`;
+  };
+
   const prepare = (sql) => {
-    const query = sql.trim();
+    const query = normalizePlaceholders(sql.trim());
     const isInsert = /^INSERT\s+/i.test(query) && !/RETURNING\s+.+/i.test(query);
 
     return {
       run: async (...params) => {
-        const finalSql = isInsert ? `${query} RETURNING id` : query;
+        const finalSql = isInsert ? appendReturningId(query) : query;
         const result = await pool.query(finalSql, params);
         return {
           lastInsertRowid: result.rows[0]?.id,

@@ -5,12 +5,24 @@ services:
     plan: free
     branch: main
     buildCommand: "npm install && npm run build"
-    startCommand: "npm start"
+    startCommand: "node server.js"
     envVars:
       - key: NODE_ENV
         value: production
       - key: FRONTEND_URL
         value: https://dj-booking-app-kai99.onrender.com
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dj-booking-db-kai99
+          property: connectionString
+
+databases:
+  - name: dj-booking-db-kai99
+    plan: free
+    databaseName: dj_booking_app
+    user: dj_booking_app_user
 
 # Note: You still need to connect this repository to Render (via GitHub or GitLab)
 # and create the service from the Render dashboard, or use the Render API.
