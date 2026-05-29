@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "prebuild": "npm install",
-    "build": "esbuild src/index.js --bundle --outfile=public/bundle.js --loader:.js=jsx --platform=browser",
+    "build": "npm install && esbuild src/index.js --bundle --outfile=public/bundle.js --loader:.js=jsx --platform=browser",
     "start": "npm run build && node server.js",
     "dev": "node server.js"
   },
