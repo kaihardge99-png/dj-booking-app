@@ -27,10 +27,12 @@ Quick steps to deploy this project to Render (no prior Render experience assumed
    - `JWT_SECRET` (set a secure random value)
    - `EMAIL_USER` (your Gmail address used for nodemailer)
    - `EMAIL_PASSWORD` (app password if using Gmail)
+   - `FRONTEND_URL` (the public URL for your deployed service, e.g. `https://your-app.onrender.com`)
 
-5) (Optional but recommended) Use a proper managed database instead of SQLite:
+5) Use a proper managed database instead of SQLite for production:
    - SQLite (`bookings.db`) is stored inside the container and will be lost on redeploys or restarts.
-   - Render offers managed PostgreSQL. If you add one, update `server.js` to use Postgres and migrate the data.
+   - Render offers managed PostgreSQL. Connect a managed database and Render will provide a `DATABASE_URL` environment variable.
+   - This app now supports `DATABASE_URL` automatically and will fallback to SQLite locally if the env var is not present.
 
 6) Deploy and monitor logs in Render dashboard. Once the service is live you will get a stable public URL.
 

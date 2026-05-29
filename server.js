@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { Pool } = require('pg');
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -8,6 +9,8 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
+const usePostgres = Boolean(process.env.DATABASE_URL);
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -25,12 +28,64 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Database setup
-const db = new Database('./bookings.db');
-db.pragma('journal_mode = WAL');
+const createSqliteDb = () => {
+  const sqlite = new Database('./bookings.db');
+  sqlite.pragma('journal_mode = WAL');
 
-// Create tables
-db.exec(`
+  return {
+    exec: async (sql) => sqlite.exec(sql),
+    prepare: (sql) => {
+      const stmt = sqlite.prepare(sql);
+      return {
+        run: (...params) => stmt.run(...params),
+        get: (...params) => stmt.get(...params),
+        all: (...params) => stmt.all(...params),
+      };
+    },
+  };
+};
+
+const createPostgresDb = () => {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: isProd ? { rejectUnauthorized: false } : false,
+  });
+
+  const prepare = (sql) => {
+    const query = sql.trim();
+    const isInsert = /^INSERT\s+/i.test(query) && !/RETURNING\s+.+/i.test(query);
+
+    return {
+      run: async (...params) => {
+        const finalSql = isInsert ? `${query} RETURNING id` : query;
+        const result = await pool.query(finalSql, params);
+        return {
+          lastInsertRowid: result.rows[0]?.id,
+          changes: result.rowCount,
+        };
+      },
+      get: async (...params) => {
+        const result = await pool.query(query, params);
+        return result.rows[0];
+      },
+      all: async (...params) => {
+        const result = await pool.query(query, params);
+        return result.rows;
+      },
+    };
+  };
+
+  return {
+    exec: async (sql) => {
+      await pool.query(sql);
+    },
+    prepare,
+  };
+};
+
+const db = usePostgres ? createPostgresDb() : createSqliteDb();
+
+const sqliteSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
@@ -64,7 +119,51 @@ db.exec(`
     reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-`);
+`;
+
+const postgresSchemaStatements = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE,
+    password TEXT,
+    email TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS bookings (
+    id SERIAL PRIMARY KEY,
+    user_name TEXT NOT NULL,
+    user_email TEXT NOT NULL,
+    user_phone TEXT NOT NULL,
+    booking_date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    duration_hours INTEGER NOT NULL,
+    package_type TEXT NOT NULL,
+    cdj_count INTEGER,
+    mixer_type TEXT,
+    djm_v10_addon BOOLEAN DEFAULT FALSE,
+    notes TEXT,
+    status TEXT DEFAULT 'pending',
+    total_price REAL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS blocked_dates (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL UNIQUE,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+];
+
+const initializeDatabase = async () => {
+  if (usePostgres) {
+    for (const statement of postgresSchemaStatements) {
+      await db.exec(statement);
+    }
+  } else {
+    await db.exec(sqliteSchema);
+  }
+};
 
 // Email configuration
 const transporter = nodemailer.createTransport({
@@ -121,7 +220,7 @@ const parseDurationHours = (start_time, end_time) => {
 // Authentication Routes
 
 // User Signup
-app.post('/api/auth/signup', (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
@@ -134,7 +233,7 @@ app.post('/api/auth/signup', (req, res) => {
 
     // Insert user
     const stmt = db.prepare('INSERT INTO users (username, email, password) VALUES (?, ?, ?)');
-    const result = stmt.run(username, email, hashedPassword);
+    const result = await stmt.run(username, email, hashedPassword);
 
     // Create JWT token
     const token = jwt.sign({ userId: result.lastInsertRowid, username }, process.env.JWT_SECRET, { expiresIn: '7d' });
@@ -142,7 +241,7 @@ app.post('/api/auth/signup', (req, res) => {
     res.status(201).json({ token, username });
   } catch (error) {
     console.error('Signup error:', error.message);
-    if (error.message.includes('UNIQUE constraint failed')) {
+    if (error.message.includes('UNIQUE constraint failed') || error.message.includes('unique constraint')) {
       res.status(400).json({ error: 'Username already exists' });
     } else {
       res.status(500).json({ error: error.message });
@@ -151,7 +250,7 @@ app.post('/api/auth/signup', (req, res) => {
 });
 
 // User Login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -161,7 +260,7 @@ app.post('/api/auth/login', (req, res) => {
 
     // Find user
     const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
-    const user = stmt.get(username);
+    const user = await stmt.get(username);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid username or password' });
@@ -183,7 +282,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // Forgot password
-app.post('/api/forgot-password', (req, res) => {
+app.post('/api/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
 
@@ -193,7 +292,7 @@ app.post('/api/forgot-password', (req, res) => {
 
     // Find user by email
     const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
-    const user = stmt.get(email);
+    const user = await stmt.get(email);
 
     if (!user) {
       // Don't reveal if email exists for security
@@ -204,7 +303,7 @@ app.post('/api/forgot-password', (req, res) => {
     const resetToken = jwt.sign({ userId: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
     
     // Send reset email
-    const resetLink = `https://lunar-decree-gaffe.ngrok-free.dev/?reset=${resetToken}`;
+    const resetLink = `${FRONTEND_URL}/?reset=${resetToken}`;
     
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -256,7 +355,7 @@ app.post('/api/forgot-password', (req, res) => {
 });
 
 // Reset password
-app.post('/api/reset-password', (req, res) => {
+app.post('/api/reset-password', async (req, res) => {
   try {
     const { resetToken, password } = req.body;
 
@@ -277,7 +376,7 @@ app.post('/api/reset-password', (req, res) => {
 
     // Update the user's password
     const stmt = db.prepare('UPDATE users SET password = ? WHERE id = ?');
-    stmt.run(hashedPassword, decoded.userId);
+    await stmt.run(hashedPassword, decoded.userId);
 
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
@@ -288,10 +387,10 @@ app.post('/api/reset-password', (req, res) => {
 // Routes
 
 // Get all bookings
-app.get('/api/bookings', (req, res) => {
+app.get('/api/bookings', async (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM bookings ORDER BY booking_date DESC');
-    const rows = stmt.all();
+    const rows = await stmt.all();
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -299,11 +398,11 @@ app.get('/api/bookings', (req, res) => {
 });
 
 // Get bookings by email
-app.get('/api/bookings/email/:email', (req, res) => {
+app.get('/api/bookings/email/:email', async (req, res) => {
   try {
     const { email } = req.params;
     const stmt = db.prepare('SELECT * FROM bookings WHERE user_email = ? ORDER BY booking_date DESC');
-    const rows = stmt.all(email);
+    const rows = await stmt.all(email);
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -311,7 +410,7 @@ app.get('/api/bookings/email/:email', (req, res) => {
 });
 
 // Create booking
-app.post('/api/bookings', (req, res) => {
+app.post('/api/bookings', async (req, res) => {
   const {
     user_name,
     user_email,
@@ -357,7 +456,7 @@ app.post('/api/bookings', (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(
+    const result = await stmt.run(
       user_name,
       user_email,
       user_phone,
@@ -444,7 +543,7 @@ app.post('/api/bookings', (req, res) => {
           <li>Total Price: $${total_price}</li>
           <li>Notes: ${notes || 'None'}</li>
         </ul>
-        <p><a href="http://localhost:5000">View in Admin Dashboard</a></p>
+        <p><a href="${FRONTEND_URL}">View in Admin Dashboard</a></p>
       `,
     };
 
@@ -459,7 +558,7 @@ app.post('/api/bookings', (req, res) => {
     res.status(201).json({ id: result.lastInsertRowid, total_price });
   } catch (error) {
     console.error('Booking error:', error.message);
-    if (error.message.includes('NOT NULL constraint failed')) {
+    if (error.message.includes('NOT NULL constraint failed') || error.message.includes('null value in column')) {
       res.status(400).json({ error: 'Booking could not be saved. Please check all fields and try again.' });
     } else {
       res.status(500).json({ error: error.message });
@@ -468,13 +567,13 @@ app.post('/api/bookings', (req, res) => {
 });
 
 // Update booking status
-app.put('/api/bookings/:id', (req, res) => {
+app.put('/api/bookings/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
     const stmt = db.prepare('UPDATE bookings SET status = ? WHERE id = ?');
-    stmt.run(status, id);
+    await stmt.run(status, id);
 
     res.json({ success: true });
   } catch (error) {
@@ -483,10 +582,10 @@ app.put('/api/bookings/:id', (req, res) => {
 });
 
 // Get blocked dates
-app.get('/api/blocked-dates', (req, res) => {
+app.get('/api/blocked-dates', async (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM blocked_dates ORDER BY date');
-    const rows = stmt.all();
+    const rows = await stmt.all();
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -494,7 +593,7 @@ app.get('/api/blocked-dates', (req, res) => {
 });
 
 // Add blocked date
-app.post('/api/blocked-dates', (req, res) => {
+app.post('/api/blocked-dates', async (req, res) => {
   try {
     const { date, reason } = req.body;
 
@@ -503,7 +602,7 @@ app.post('/api/blocked-dates', (req, res) => {
     }
 
     const stmt = db.prepare('INSERT INTO blocked_dates (date, reason) VALUES (?, ?)');
-    const result = stmt.run(date, reason);
+    const result = await stmt.run(date, reason);
 
     res.status(201).json({ id: result.lastInsertRowid });
   } catch (error) {
@@ -512,12 +611,12 @@ app.post('/api/blocked-dates', (req, res) => {
 });
 
 // Delete blocked date
-app.delete('/api/blocked-dates/:id', (req, res) => {
+app.delete('/api/blocked-dates/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
     const stmt = db.prepare('DELETE FROM blocked_dates WHERE id = ?');
-    stmt.run(id);
+    await stmt.run(id);
 
     res.json({ success: true });
   } catch (error) {
@@ -566,7 +665,7 @@ const verifyToken = (req, res, next) => {
 };
 
 // Get user bookings by username
-app.get('/api/bookings/user/:username', verifyToken, (req, res) => {
+app.get('/api/bookings/user/:username', verifyToken, async (req, res) => {
   try {
     const { username } = req.params;
 
@@ -576,7 +675,7 @@ app.get('/api/bookings/user/:username', verifyToken, (req, res) => {
     }
 
     const stmt = db.prepare('SELECT * FROM bookings WHERE user_name = ? ORDER BY booking_date DESC');
-    const rows = stmt.all(username);
+    const rows = await stmt.all(username);
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -584,7 +683,7 @@ app.get('/api/bookings/user/:username', verifyToken, (req, res) => {
 });
 
 // Get user info by username
-app.get('/api/user/info/:username', verifyToken, (req, res) => {
+app.get('/api/user/info/:username', verifyToken, async (req, res) => {
   try {
     const { username } = req.params;
 
@@ -594,7 +693,7 @@ app.get('/api/user/info/:username', verifyToken, (req, res) => {
     }
 
     const stmt = db.prepare('SELECT username, email FROM users WHERE username = ?');
-    const user = stmt.get(username);
+    const user = await stmt.get(username);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -607,7 +706,7 @@ app.get('/api/user/info/:username', verifyToken, (req, res) => {
 });
 
 // Update user info by username
-app.put('/api/user/update/:username', verifyToken, (req, res) => {
+app.put('/api/user/update/:username', verifyToken, async (req, res) => {
   try {
     const { username } = req.params;
     const { email } = req.body;
@@ -622,7 +721,7 @@ app.put('/api/user/update/:username', verifyToken, (req, res) => {
     }
 
     const stmt = db.prepare('UPDATE users SET email = ? WHERE username = ?');
-    stmt.run(email, username);
+    await stmt.run(email, username);
 
     res.json({ message: 'Profile updated successfully', username, email });
   } catch (error) {
@@ -631,6 +730,11 @@ app.put('/api/user/update/:username', verifyToken, (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+initializeDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}).catch((err) => {
+  console.error('Database initialization failed:', err);
+  process.exit(1);
 });
