@@ -100,6 +100,18 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
     if (!formData.user_email.trim()) newErrors.user_email = 'Email is required';
     if (!formData.user_phone.trim()) newErrors.user_phone = 'Phone is required';
     if (!formData.booking_date) newErrors.booking_date = 'Date is required';
+    else {
+      // enforce 30-day booking window client-side
+      const bookingDate = new Date(formData.booking_date);
+      bookingDate.setHours(0,0,0,0);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const max = new Date(today); max.setDate(max.getDate() + 30);
+      if (bookingDate < today) {
+        newErrors.booking_date = 'Cannot book past dates';
+      } else if (bookingDate > max) {
+        newErrors.booking_date = 'Bookings can only be made up to 30 days in advance';
+      }
+    }
     if (!formData.start_time) newErrors.start_time = 'Start time is required';
     if (!formData.end_time) newErrors.end_time = 'End time is required';
 

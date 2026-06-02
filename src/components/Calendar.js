@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './Calendar.css';
 
+const MAX_BOOKING_DAYS = 30;
+
 function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, selectedDate, selectedTime, selectedEndTime, availabilityVersion }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [availableTimes, setAvailableTimes] = useState([]);
@@ -80,7 +82,15 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
 
   const isDateBlocked = (day) => {
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return blockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr);
+    return blockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr) || isBeyondMaxDate(day);
+  };
+
+  const isBeyondMaxDate = (day) => {
+    const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setHours(0,0,0,0);
+    const max = new Date(); max.setHours(0,0,0,0); max.setDate(max.getDate() + MAX_BOOKING_DAYS);
+    return d > max;
   };
 
   const isDateClosed = (day) => {

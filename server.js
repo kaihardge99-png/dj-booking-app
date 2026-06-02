@@ -883,6 +883,35 @@ app.post('/api/bookings', async (req, res) => {
   if (!user_name || !user_email || !user_phone || !booking_date || !start_time || !end_time || !package_type) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
+  // Enforce maximum booking window (30 days from today)
+  const parseDateOnly = (s) => {
+    try {
+      const d = new Date(`${s}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return null;
+      d.setHours(0,0,0,0);
+      return d;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const bookingDateObj = parseDateOnly(booking_date);
+  if (!bookingDateObj) {
+    return res.status(400).json({ error: 'Invalid booking_date' });
+  }
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const maxDate = new Date(today);
+  maxDate.setDate(maxDate.getDate() + 30);
+
+  if (bookingDateObj < today) {
+    return res.status(400).json({ error: 'Cannot book past dates' });
+  }
+
+  if (bookingDateObj > maxDate) {
+    return res.status(400).json({ error: 'Bookings can only be made up to 30 days in advance' });
+  }
 
   if (!PRICING[package_type]) {
     return res.status(400).json({ error: 'Invalid package type' });
