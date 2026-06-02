@@ -30,6 +30,58 @@
   margin-bottom: 30px;
 }
 
+.calendar-status-card {
+  background-color: #fff8e1;
+  border: 2px solid #f0c14b;
+  border-radius: 6px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.calendar-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.status-pill.active {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-pill.inactive {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.calendar-unavailable-list ul {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  list-style: disc;
+}
+
+.calendar-unavailable-list p,
+.calendar-help-text {
+  margin: 10px 0 0;
+  color: #555;
+}
+
 .stat-card {
   background-color: #f9f9f9;
   border: 2px solid #000;

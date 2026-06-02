@@ -5,6 +5,8 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
   const [activeTab, setActiveTab] = useState('bookings');
   const [bookings, setBookings] = useState([]);
   const [blockedDates, setBlockedDates] = useState([]);
+  const [calendarStatus, setCalendarStatus] = useState({ googleCalendarLinked: false, authMode: 'none' });
+  const [calendarUnavailableDates, setCalendarUnavailableDates] = useState([]);
   const [newBlockedDate, setNewBlockedDate] = useState('');
   const [newBlockedReason, setNewBlockedReason] = useState('');
   const [stats, setStats] = useState({
@@ -17,7 +19,23 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
   useEffect(() => {
     fetchBookings();
     fetchBlockedDates();
+    fetchCalendarAvailability();
   }, []);
+
+  const fetchCalendarAvailability = async () => {
+    try {
+      const today = new Date();
+      const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      const response = await fetch(`/api/availability?month=${month}`);
+      if (!response.ok) return;
+
+      const data = await response.json();
+      setCalendarStatus(data.source || { googleCalendarLinked: false, authMode: 'none' });
+      setCalendarUnavailableDates(data.unavailableDates || []);
+    } catch (error) {
+      console.error('Error fetching calendar availability:', error);
+    }
+  };
 
   const fetchBookings = async () => {
     try {
@@ -135,6 +153,37 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
             <h3>Revenue</h3>
             <p className="stat-value">${stats.revenue.toFixed(2)}</p>
           </div>
+        </div>
+
+        <div className="calendar-status-card">
+          <div className="calendar-status-header">
+            <h3>Calendar Availability</h3>
+            <span className={`status-pill ${calendarStatus.googleCalendarLinked ? 'active' : 'inactive'}`}>
+              {calendarStatus.googleCalendarLinked ? 'Linked' : 'Not linked'}
+            </span>
+          </div>
+          <p>
+            Source: <strong>{calendarStatus.authMode.replace('_', ' ')}</strong>
+          </p>
+          {calendarStatus.googleCalendarLinked ? (
+            <div className="calendar-unavailable-list">
+              <strong>Unavailable dates this month:</strong>
+              {calendarUnavailableDates.length > 0 ? (
+                <ul>
+                  {calendarUnavailableDates.slice(0, 5).map((date) => (
+                    <li key={date}>{date}</li>
+                  ))}
+                  {calendarUnavailableDates.length > 5 && <li>...and more</li>}
+                </ul>
+              ) : (
+                <p>No unavailable dates were found.</p>
+              )}
+            </div>
+          ) : (
+            <p className="calendar-help-text">
+              If your Google Calendar is linked, unavailable dates will appear here.
+            </p>
+          )}
         </div>
 
         {/* Tabs */}
