@@ -11,6 +11,11 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
   const [newBlockedStartTime, setNewBlockedStartTime] = useState('');
   const [newBlockedEndTime, setNewBlockedEndTime] = useState('');
   const [newBlockedReason, setNewBlockedReason] = useState('');
+  const [editingBlockedDateId, setEditingBlockedDateId] = useState(null);
+  const [editingBlockedDate, setEditingBlockedDate] = useState('');
+  const [editingBlockedStartTime, setEditingBlockedStartTime] = useState('');
+  const [editingBlockedEndTime, setEditingBlockedEndTime] = useState('');
+  const [editingBlockedReason, setEditingBlockedReason] = useState('');
   const [stats, setStats] = useState({
     total: 0,
     confirmed: 0,
@@ -134,6 +139,53 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
       }
     } catch (error) {
       console.error('Error deleting blocked date:', error);
+    }
+  };
+
+  const handleEditBlockedDate = (item) => {
+    setEditingBlockedDateId(item.id);
+    setEditingBlockedDate(item.date);
+    setEditingBlockedStartTime(item.start_time || '');
+    setEditingBlockedEndTime(item.end_time || '');
+    setEditingBlockedReason(item.reason || '');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingBlockedDateId(null);
+    setEditingBlockedDate('');
+    setEditingBlockedStartTime('');
+    setEditingBlockedEndTime('');
+    setEditingBlockedReason('');
+  };
+
+  const handleSaveBlockedDate = async (e) => {
+    e.preventDefault();
+
+    if (!editingBlockedDate) {
+      alert('Please select a date');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/blocked-dates/${editingBlockedDateId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: editingBlockedDate,
+          reason: editingBlockedReason,
+          start_time: editingBlockedStartTime || null,
+          end_time: editingBlockedEndTime || null,
+        }),
+      });
+
+      if (response.ok) {
+        handleCancelEdit();
+        fetchBlockedDates();
+        fetchCalendarAvailability();
+        onBlockedDatesUpdate();
+      }
+    } catch (error) {
+      console.error('Error updating blocked date:', error);
     }
   };
 
@@ -314,21 +366,83 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
               <div className="blocked-dates-list unavailable-dates-list">
                 {blockedDates.map((item) => (
                   <div key={item.id} className="blocked-date-item unavailable-date-item">
-                    <div className="date-info">
-                      <strong>{item.date}</strong>
-                      {item.start_time && item.end_time ? (
-                        <span className="reason">{item.start_time} - {item.end_time}</span>
-                      ) : (
-                        <span className="reason">Full day</span>
-                      )}
-                      {item.reason && <span className="reason">{item.reason}</span>}
-                    </div>
-                    <button
-                      className="delete-btn"
-                      onClick={() => handleDeleteBlockedDate(item.id)}
-                    >
-                      Remove
-                    </button>
+                    {editingBlockedDateId === item.id ? (
+                      <form onSubmit={handleSaveBlockedDate} className="edit-blocked-date-form">
+                        <div className="form-row">
+                          <div className="form-group">
+                            <label htmlFor="edit_blocked_date">Date</label>
+                            <input
+                              type="date"
+                              id="edit_blocked_date"
+                              value={editingBlockedDate}
+                              onChange={(e) => setEditingBlockedDate(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label htmlFor="edit_blocked_start_time">Start Time (Optional)</label>
+                            <input
+                              type="time"
+                              id="edit_blocked_start_time"
+                              value={editingBlockedStartTime}
+                              onChange={(e) => setEditingBlockedStartTime(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label htmlFor="edit_blocked_end_time">End Time (Optional)</label>
+                            <input
+                              type="time"
+                              id="edit_blocked_end_time"
+                              value={editingBlockedEndTime}
+                              onChange={(e) => setEditingBlockedEndTime(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label htmlFor="edit_blocked_reason">Reason (Optional)</label>
+                            <input
+                              type="text"
+                              id="edit_blocked_reason"
+                              value={editingBlockedReason}
+                              onChange={(e) => setEditingBlockedReason(e.target.value)}
+                              placeholder="e.g., Maintenance, Event"
+                            />
+                          </div>
+                          <div className="button-group">
+                            <button type="submit" className="save-btn">
+                              Save
+                            </button>
+                            <button type="button" className="cancel-btn" onClick={handleCancelEdit}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="date-info">
+                          <strong>{item.date}</strong>
+                          {item.start_time && item.end_time ? (
+                            <span className="reason">{item.start_time} - {item.end_time}</span>
+                          ) : (
+                            <span className="reason">Full day</span>
+                          )}
+                          {item.reason && <span className="reason">{item.reason}</span>}
+                        </div>
+                        <div className="action-buttons">
+                          <button
+                            className="edit-btn"
+                            onClick={() => handleEditBlockedDate(item)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="delete-btn"
+                            onClick={() => handleDeleteBlockedDate(item.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

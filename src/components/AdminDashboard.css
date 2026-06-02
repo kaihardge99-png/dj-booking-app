@@ -306,6 +306,79 @@
   color: #dc3545;
 }
 
+.edit-btn {
+  padding: 6px 12px;
+  background-color: #007bff;
+  color: #fff;
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-right: 8px;
+}
+
+.edit-btn:hover {
+  background-color: #fff;
+  color: #007bff;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-blocked-date-form {
+  width: 100%;
+}
+
+.edit-blocked-date-form .form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.save-btn {
+  padding: 6px 12px;
+  background-color: #28a745;
+  color: #fff;
+  border: 2px solid #28a745;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.save-btn:hover {
+  background-color: #fff;
+  color: #28a745;
+}
+
+.cancel-btn {
+  padding: 6px 12px;
+  background-color: #6c757d;
+  color: #fff;
+  border: 2px solid #6c757d;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+  background-color: #fff;
+  color: #6c757d;
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
+}
+
 @media (max-width: 768px) {
   .dashboard-card {
     padding: 20px;

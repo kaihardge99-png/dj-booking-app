@@ -1079,6 +1079,10 @@ app.get('/api/availability', async (req, res) => {
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
 
+    // Re-fetch blocked dates after sync
+    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ?');
+    const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate);
+
     const unavailableDates = [];
     const slotsByDate = {};
 
@@ -1145,6 +1149,26 @@ app.delete('/api/blocked-dates/:id', async (req, res) => {
 
     const stmt = db.prepare('DELETE FROM blocked_dates WHERE id = ?');
     await stmt.run(id);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/blocked-dates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, start_time, end_time, reason } = req.body;
+
+    if (!date) {
+      return res.status(400).json({ error: 'Date is required' });
+    }
+
+    const stmt = db.prepare(
+      'UPDATE blocked_dates SET date = ?, start_time = ?, end_time = ?, reason = ? WHERE id = ?',
+    );
+    await stmt.run(date, start_time || null, end_time || null, reason || null, id);
 
     res.json({ success: true });
   } catch (error) {
