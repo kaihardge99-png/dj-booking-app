@@ -1090,7 +1090,7 @@ app.get('/api/availability', async (req, res) => {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
       const dayBookings = activeBookingRows.filter((row) => row.booking_date === date);
       const dayEvents = filterEventsForDate(date, googleEvents);
-      const availability = await listDateAvailability(date, blockedRows, dayBookings, dayEvents);
+      const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
 
       slotsByDate[date] = availability.slots;
       if (availability.isUnavailable) {
