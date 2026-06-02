@@ -972,6 +972,18 @@ app.post('/api/bookings', async (req, res) => {
         return res.status(400).json({ error: 'End time must be later than start time' });
       }
 
+      const bookingDay = new Date(booking_date).getDay();
+      const operatingHours = OPERATING_HOURS[bookingDay];
+      if (!operatingHours) {
+        return res.status(400).json({ error: 'This date is not available for booking' });
+      }
+
+      const openMinutes = operatingHours.open * 60;
+      const closeMinutes = operatingHours.close * 60;
+      if (bookingStart < openMinutes || bookingEnd > closeMinutes) {
+        return res.status(400).json({ error: `Operating hours are ${operatingHours.open}:00 - ${operatingHours.close}:00` });
+      }
+
       try {
         const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date = ?');
         const blockedRows = await blockedStmt.all(booking_date);
