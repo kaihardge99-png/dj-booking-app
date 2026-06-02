@@ -162,6 +162,15 @@ const sqliteSchema = `
     end_time TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS calendar_events_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_uid TEXT UNIQUE,
+    event_date TEXT NOT NULL,
+    start_time TEXT,
+    end_time TEXT,
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `;
 
 const postgresSchemaStatements = [
@@ -197,6 +206,14 @@ const postgresSchemaStatements = [
     start_time TEXT,
     end_time TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS calendar_events_cache (
+    id SERIAL PRIMARY KEY,
+    event_uid TEXT UNIQUE,
+    event_date TEXT NOT NULL,
+    start_time TEXT,
+    end_time TEXT,
+    last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
 ];
 
@@ -557,9 +574,72 @@ const parseIcsEvents = (icsText) => {
         }
       }
     }
+
+    if (key === 'UID') {
+      event.uid = rawValue.trim();
+    }
   });
 
   return events;
+};
+
+const syncCalendarEventsAndBlockDeleted = async (currentEvents) => {
+  try {
+    // Get all currently cached events
+    const cachedStmt = db.prepare('SELECT event_uid, event_date, start_time, end_time FROM calendar_events_cache');
+    const cachedEvents = await cachedStmt.all();
+
+    // Build a set of current event UIDs for quick lookup
+    const currentEventUids = new Set(currentEvents.filter((e) => e.uid).map((e) => e.uid));
+
+    // Check for deleted events (were cached, but not in current events)
+    for (const cached of cachedEvents) {
+      if (cached.event_uid && !currentEventUids.has(cached.event_uid)) {
+        // This event was deleted from Google Calendar
+        // Auto-block this time slot
+        const reason = 'Auto-blocked: removed from Google Calendar';
+
+        const checkStmt = db.prepare('SELECT id FROM blocked_dates WHERE date = ?');
+        const existing = await checkStmt.get(cached.event_date);
+
+        if (!existing) {
+          const insertStmt = db.prepare(
+            'INSERT INTO blocked_dates (date, start_time, end_time, reason) VALUES (?, ?, ?, ?)',
+          );
+          await insertStmt.run(cached.event_date, cached.start_time, cached.end_time, reason);
+        }
+
+        // Remove from cache
+        const deleteStmt = db.prepare('DELETE FROM calendar_events_cache WHERE event_uid = ?');
+        await deleteStmt.run(cached.event_uid);
+      }
+    }
+
+    // Update cache with current events
+    for (const event of currentEvents) {
+      if (!event.uid) continue;
+
+      const eventRange = getLocalEventRange(event);
+      if (!eventRange) continue;
+
+      const eventDate = eventRange.startDate;
+      const startTime = eventRange.fullDay ? null : toTimeString(eventRange.startMinutes);
+      const endTime = eventRange.fullDay ? null : toTimeString(eventRange.endMinutes);
+
+      // Delete old entry if it exists
+      const deleteStmt = db.prepare('DELETE FROM calendar_events_cache WHERE event_uid = ?');
+      await deleteStmt.run(event.uid);
+
+      // Insert new entry
+      const insertStmt = db.prepare(
+        `INSERT INTO calendar_events_cache (event_uid, event_date, start_time, end_time, last_seen)
+         VALUES (?, ?, ?, ?, datetime('now'))`,
+      );
+      await insertStmt.run(event.uid, eventDate, startTime, endTime);
+    }
+  } catch (error) {
+    console.error('Calendar sync error:', error.message);
+  }
 };
 
 // Pricing
@@ -995,6 +1075,9 @@ app.get('/api/availability', async (req, res) => {
     const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
     const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+
+    // Sync calendar events and auto-block deleted availability slots
+    await syncCalendarEventsAndBlockDeleted(googleEvents);
 
     const unavailableDates = [];
     const slotsByDate = {};
