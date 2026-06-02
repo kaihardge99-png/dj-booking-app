@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import './Calendar.css';
 
-const MAX_BOOKING_DAYS = 30;
-
 function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, selectedDate, selectedTime, selectedEndTime, availabilityVersion }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [availableTimes, setAvailableTimes] = useState([]);
   const [apiUnavailableDates, setApiUnavailableDates] = useState([]);
   const [apiSlotsByDate, setApiSlotsByDate] = useState({});
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState({ linked: false, authMode: 'none' });
+  const [maxBookingDays, setMaxBookingDays] = useState(30);
 
   const OPERATING_HOURS = {
     0: null, // Sunday - closed
@@ -19,6 +18,20 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
     5: { open: 10, close: 22 }, // Friday
     6: { open: 10, close: 17 }, // Saturday
   };
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) return;
+        const data = await response.json();
+        setMaxBookingDays(data.max_booking_days || 30);
+      } catch (error) {
+        console.error('Error fetching settings:', error);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   useEffect(() => {
     const fetchAvailability = async () => {
@@ -89,7 +102,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const d = new Date(dateStr + 'T00:00:00');
     d.setHours(0,0,0,0);
-    const max = new Date(); max.setHours(0,0,0,0); max.setDate(max.getDate() + MAX_BOOKING_DAYS);
+    const max = new Date(); max.setHours(0,0,0,0); max.setDate(max.getDate() + maxBookingDays);
     return d > max;
   };
 

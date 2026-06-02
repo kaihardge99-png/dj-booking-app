@@ -38,6 +38,21 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
   const [totalPrice, setTotalPrice] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [availabilityVersion, setAvailabilityVersion] = useState(0);
+  const [maxBookingDays, setMaxBookingDays] = useState(30);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) return;
+        const data = await response.json();
+        setMaxBookingDays(data.max_booking_days || 30);
+      } catch (error) {
+        console.error('Error fetching settings:', error);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   useEffect(() => {
     calculatePrice();
@@ -105,11 +120,11 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       const bookingDate = new Date(formData.booking_date);
       bookingDate.setHours(0,0,0,0);
       const today = new Date(); today.setHours(0,0,0,0);
-      const max = new Date(today); max.setDate(max.getDate() + 30);
+      const max = new Date(today); max.setDate(max.getDate() + maxBookingDays);
       if (bookingDate < today) {
         newErrors.booking_date = 'Cannot book past dates';
       } else if (bookingDate > max) {
-        newErrors.booking_date = 'Bookings can only be made up to 30 days in advance';
+        newErrors.booking_date = `Bookings can only be made up to ${maxBookingDays} days in advance`;
       }
     }
     if (!formData.start_time) newErrors.start_time = 'Start time is required';

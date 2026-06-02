@@ -22,11 +22,15 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     pending: 0,
     revenue: 0,
   });
+  const [maxBookingDays, setMaxBookingDays] = useState(30);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
 
   useEffect(() => {
     fetchBookings();
     fetchBlockedDates();
     fetchCalendarAvailability();
+    fetchSettings();
   }, []);
 
   const fetchCalendarAvailability = async () => {
@@ -62,6 +66,44 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
       setBlockedDates(data);
     } catch (error) {
       console.error('Error fetching blocked dates:', error);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const response = await fetch('/api/settings');
+      if (!response.ok) return;
+      const data = await response.json();
+      setMaxBookingDays(data.max_booking_days || 30);
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+    }
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    setSettingsMessage('');
+
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_booking_days: maxBookingDays }),
+      });
+
+      if (response.ok) {
+        setSettingsMessage('Settings saved successfully!');
+        setTimeout(() => setSettingsMessage(''), 3000);
+      } else {
+        const data = await response.json();
+        setSettingsMessage(data.error || 'Error saving settings');
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      setSettingsMessage('Error saving settings');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -259,6 +301,12 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
           >
             Unavailable Dates
           </button>
+          <button
+            className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            Settings
+          </button>
         </div>
 
         {/* Bookings Tab */}
@@ -447,6 +495,35 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Settings Tab */}
+        {activeTab === 'settings' && (
+          <div className="tab-content">
+            <h2>Booking Settings</h2>
+            <form onSubmit={handleSaveSettings} className="settings-form">
+              <div className="form-group">
+                <label htmlFor="max_booking_days">Maximum Booking Days in Advance</label>
+                <input
+                  type="number"
+                  id="max_booking_days"
+                  min="1"
+                  max="365"
+                  value={maxBookingDays}
+                  onChange={(e) => setMaxBookingDays(Math.max(1, Math.min(365, parseInt(e.target.value) || 30)))}
+                />
+                <small>Customers can only book this many days in advance (1-365 days)</small>
+              </div>
+              <button type="submit" className="save-btn" disabled={savingSettings}>
+                {savingSettings ? 'Saving...' : 'Save Settings'}
+              </button>
+              {settingsMessage && (
+                <div className={`message ${settingsMessage.includes('successfully') ? 'success' : 'error'}`}>
+                  {settingsMessage}
+                </div>
+              )}
+            </form>
           </div>
         )}
       </div>

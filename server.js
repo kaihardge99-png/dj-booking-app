@@ -125,6 +125,26 @@ const ensureBlockedDatesColumns = async () => {
   }
 };
 
+const getSetting = async (key, defaultValue) => {
+  try {
+    const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
+    const row = await stmt.get(key);
+    return row ? (row.value ? JSON.parse(row.value) : defaultValue) : defaultValue;
+  } catch (error) {
+    console.error(`Error fetching setting ${key}:`, error.message);
+    return defaultValue;
+  }
+};
+
+const setSetting = async (key, value) => {
+  try {
+    const stmt = db.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now")) ON CONFLICT(key) DO UPDATE SET value=?, updated_at=datetime("now")');
+    await stmt.run(key, JSON.stringify(value), JSON.stringify(value));
+  } catch (error) {
+    console.error(`Error setting ${key}:`, error.message);
+  }
+};
+
 const sqliteSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +190,14 @@ const sqliteSchema = `
     end_time TEXT,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `;
 
 const postgresSchemaStatements = [
@@ -213,6 +241,13 @@ const postgresSchemaStatements = [
     start_time TEXT,
     end_time TEXT,
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS settings (
+    id SERIAL PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
 ];
 
@@ -883,7 +918,7 @@ app.post('/api/bookings', async (req, res) => {
   if (!user_name || !user_email || !user_phone || !booking_date || !start_time || !end_time || !package_type) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
-  // Enforce maximum booking window (30 days from today)
+  // Enforce maximum booking window (configurable from settings)
   const parseDateOnly = (s) => {
     try {
       const d = new Date(`${s}T00:00:00`);
@@ -902,15 +937,16 @@ app.post('/api/bookings', async (req, res) => {
 
   const today = new Date();
   today.setHours(0,0,0,0);
+  const maxBookingDays = await getSetting('max_booking_days', 30);
   const maxDate = new Date(today);
-  maxDate.setDate(maxDate.getDate() + 30);
+  maxDate.setDate(maxDate.getDate() + maxBookingDays);
 
   if (bookingDateObj < today) {
     return res.status(400).json({ error: 'Cannot book past dates' });
   }
 
   if (bookingDateObj > maxDate) {
-    return res.status(400).json({ error: 'Bookings can only be made up to 30 days in advance' });
+    return res.status(400).json({ error: `Bookings can only be made up to ${maxBookingDays} days in advance` });
   }
 
   if (!PRICING[package_type]) {
@@ -1272,6 +1308,34 @@ app.get('/api/operating-hours', (req, res) => {
 // Get pricing
 app.get('/api/pricing', (req, res) => {
   res.json(PRICING);
+});
+
+// Get settings
+app.get('/api/settings', async (req, res) => {
+  try {
+    const maxBookingDays = await getSetting('max_booking_days', 30);
+    res.json({ max_booking_days: maxBookingDays });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update settings (admin only)
+app.put('/api/settings', async (req, res) => {
+  try {
+    const { max_booking_days } = req.body;
+
+    if (max_booking_days !== undefined) {
+      if (typeof max_booking_days !== 'number' || max_booking_days < 1 || max_booking_days > 365) {
+        return res.status(400).json({ error: 'max_booking_days must be a number between 1 and 365' });
+      }
+      await setSetting('max_booking_days', max_booking_days);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Middleware to verify JWT token
