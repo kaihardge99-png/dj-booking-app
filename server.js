@@ -113,15 +113,14 @@ const ensureBlockedDatesColumns = async () => {
     await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS start_time TEXT;');
     await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS end_time TEXT;');
   } else {
-    try {
+    const columns = await db.prepare("PRAGMA table_info(blocked_dates);").all();
+    const columnNames = columns.map((col) => col.name);
+
+    if (!columnNames.includes('start_time')) {
       await db.exec('ALTER TABLE blocked_dates ADD COLUMN start_time TEXT');
-    } catch (err) {
-      // Column already exists
     }
-    try {
+    if (!columnNames.includes('end_time')) {
       await db.exec('ALTER TABLE blocked_dates ADD COLUMN end_time TEXT');
-    } catch (err) {
-      // Column already exists
     }
   }
 };
