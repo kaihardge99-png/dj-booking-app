@@ -17,6 +17,7 @@ const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -246,6 +247,102 @@ const toTimeString = (minutes) => {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 };
 
+const getTimeZoneParts = (date, timeZone) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const result = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      result[part.type] = part.value;
+    }
+  }
+
+  if (!result.year || !result.month || !result.day) return null;
+
+  return {
+    date: `${result.year}-${result.month}-${result.day}`,
+    hour: Number(result.hour),
+    minute: Number(result.minute),
+    second: Number(result.second),
+  };
+};
+
+const getLocalMinuteInfo = (date, timeZone) => {
+  const parts = getTimeZoneParts(date, timeZone);
+  if (!parts) return null;
+  return {
+    date: parts.date,
+    minutes: parts.hour * 60 + parts.minute,
+  };
+};
+
+const getLocalEventRange = (event) => {
+  if (event.start?.date && event.end?.date) {
+    return {
+      fullDay: true,
+      startDate: event.start.date,
+      endDate: event.end.date,
+    };
+  }
+
+  const start = new Date(event.start?.dateTime || event.start?.date);
+  const end = new Date(event.end?.dateTime || event.end?.date);
+
+  const startInfo = getLocalMinuteInfo(start, APP_TIMEZONE);
+  const endInfo = getLocalMinuteInfo(end, APP_TIMEZONE);
+
+  if (!startInfo || !endInfo) return null;
+
+  return {
+    fullDay: false,
+    startDate: startInfo.date,
+    startMinutes: startInfo.minutes,
+    endDate: endInfo.date,
+    endMinutes: endInfo.minutes,
+  };
+};
+
+const getEventRangeForDate = (date, event) => {
+  const eventRange = getLocalEventRange(event);
+  if (!eventRange) return null;
+
+  if (eventRange.fullDay) {
+    if (date >= eventRange.startDate && date < eventRange.endDate) {
+      return { start: 0, end: 24 * 60 };
+    }
+    return null;
+  }
+
+  const { startDate, endDate, startMinutes, endMinutes } = eventRange;
+
+  if (date < startDate || date > endDate) {
+    return null;
+  }
+
+  if (date === startDate && date === endDate) {
+    return { start: startMinutes, end: endMinutes };
+  }
+
+  if (date === startDate) {
+    return { start: startMinutes, end: 24 * 60 };
+  }
+
+  if (date === endDate) {
+    return { start: 0, end: endMinutes };
+  }
+
+  return { start: 0, end: 24 * 60 };
+};
+
 const overlap = (startA, endA, startB, endB) => startA < endB && endA > startB;
 
 const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleEvents) => {
@@ -264,23 +361,7 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
   const closeMinutes = hours.close * 60;
 
   const googleBusy = googleEvents
-    .map((event) => {
-      if (event.start?.date && event.end?.date) {
-        return { start: 0, end: 24 * 60 };
-      }
-
-      const start = new Date(event.start?.dateTime || event.start?.date);
-      const end = new Date(event.end?.dateTime || event.end?.date);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-        return null;
-      }
-      const startMinutes = start.getHours() * 60 + start.getMinutes();
-      const endMinutes = end.getHours() * 60 + end.getMinutes();
-      return {
-        start: startMinutes,
-        end: endMinutes,
-      };
-    })
+    .map((event) => getEventRangeForDate(date, event))
     .filter(Boolean);
 
   const blockedBusy = blockedDatesRows
@@ -904,7 +985,7 @@ app.get('/api/availability', async (req, res) => {
     const startDate = `${yearStr}-${monthStr}-01`;
     const endDate = `${yearStr}-${monthStr}-${String(lastDay.getDate()).padStart(2, '0')}`;
 
-    const blockedStmt = db.prepare('SELECT date FROM blocked_dates WHERE date >= ? AND date <= ?');
+    const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ?');
     const blockedRows = await blockedStmt.all(startDate, endDate);
 
     const bookingsStmt = db.prepare('SELECT booking_date, start_time, end_time, status FROM bookings WHERE booking_date >= ? AND booking_date <= ?');
