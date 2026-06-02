@@ -28,6 +28,8 @@ Quick steps to deploy this project to Render (no prior Render experience assumed
    - `EMAIL_USER` (your Gmail address used for nodemailer)
    - `EMAIL_PASSWORD` (app password if using Gmail)
    - `FRONTEND_URL` (the public URL for your deployed service, e.g. `https://your-app.onrender.com`)
+   - `GOOGLE_CALENDAR_ICS_URL` (easiest: use a public Google Calendar ICS link)
+   - `GOOGLE_CALENDAR_ID` and `GOOGLE_API_KEY` (alternative if you prefer the Google Calendar API)
 
 5) Use a proper managed database instead of SQLite for production:
    - SQLite (`bookings.db`) is stored inside the container and will be lost on redeploys or restarts.

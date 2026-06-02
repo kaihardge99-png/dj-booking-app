@@ -385,7 +385,8 @@ const parseIcsDate = (value) => {
 };
 
 const parseIcsEvents = (icsText) => {
-  const lines = icsText.replace(/\r\n/g, '\n').split('\n');
+  const unfoldedText = icsText.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '');
+  const lines = unfoldedText.split('\n');
   const events = [];
   let event = null;
 

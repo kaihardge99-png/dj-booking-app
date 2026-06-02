@@ -6,6 +6,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
   const [availableTimes, setAvailableTimes] = useState([]);
   const [apiUnavailableDates, setApiUnavailableDates] = useState([]);
   const [apiSlotsByDate, setApiSlotsByDate] = useState({});
+  const [googleCalendarStatus, setGoogleCalendarStatus] = useState({ linked: false, authMode: 'none' });
 
   const OPERATING_HOURS = {
     0: null, // Sunday - closed
@@ -27,6 +28,10 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
         const data = await response.json();
         setApiUnavailableDates(data.unavailableDates || []);
         setApiSlotsByDate(data.slotsByDate || {});
+        setGoogleCalendarStatus({
+          linked: Boolean(data.source?.googleCalendarLinked),
+          authMode: data.source?.authMode || 'none',
+        });
       } catch (error) {
         console.error('Error fetching availability:', error);
       }
@@ -127,6 +132,11 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
       <div className="calendar-wrapper">
         <div className="calendar-header">
           <h3>Select Date & Time</h3>
+          <p className="calendar-connected">
+            {googleCalendarStatus.linked
+              ? `Google Calendar availability is active (${googleCalendarStatus.authMode}).`
+              : 'Google Calendar not linked. Set GOOGLE_CALENDAR_ICS_URL or GOOGLE_CALENDAR_ID + GOOGLE_API_KEY in your environment.'}
+          </p>
         </div>
 
         {/* Calendar */}
