@@ -897,6 +897,54 @@ app.post('/api/bookings', async (req, res) => {
     return res.status(400).json({ error: 'Minimum booking is 2 hours' });
   }
 
+      const bookingStart = toMinutes(start_time);
+      const bookingEnd = toMinutes(end_time);
+      if (bookingStart === null || bookingEnd === null) {
+        return res.status(400).json({ error: 'Invalid booking times' });
+      }
+
+      if (bookingEnd <= bookingStart) {
+        return res.status(400).json({ error: 'End time must be later than start time' });
+      }
+
+      try {
+        const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date = ?');
+        const blockedRows = await blockedStmt.all(booking_date);
+        for (const blocked of blockedRows) {
+          if (!blocked.start_time || !blocked.end_time) {
+            return res.status(400).json({ error: 'This date has been blocked and is not available for booking' });
+          }
+          const blockedStart = toMinutes(blocked.start_time);
+          const blockedEnd = toMinutes(blocked.end_time);
+          if (blockedStart !== null && blockedEnd !== null && overlap(bookingStart, bookingEnd, blockedStart, blockedEnd)) {
+            return res.status(400).json({ error: 'This booking overlaps a blocked time range' });
+          }
+        }
+
+        const existingBookingsStmt = db.prepare('SELECT start_time, end_time FROM bookings WHERE booking_date = ? AND status != ?');
+        const existingBookings = await existingBookingsStmt.all(booking_date, 'cancelled');
+        for (const existing of existingBookings) {
+          const existingStart = toMinutes(existing.start_time);
+          const existingEnd = toMinutes(existing.end_time);
+          if (existingStart !== null && existingEnd !== null && overlap(bookingStart, bookingEnd, existingStart, existingEnd)) {
+            return res.status(400).json({ error: 'This booking overlaps an existing booking' });
+          }
+        }
+
+        const dayStartIso = new Date(`${booking_date}T00:00:00`).toISOString();
+        const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
+        const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+        const calendarEvents = filterEventsForDate(booking_date, googleEvents);
+        for (const event of calendarEvents) {
+          const eventRange = getEventRangeForDate(booking_date, event);
+          if (eventRange && overlap(bookingStart, bookingEnd, eventRange.start, eventRange.end)) {
+            return res.status(400).json({ error: 'This booking overlaps a busy Google Calendar event' });
+          }
+        }
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+
   const djmAddon = Boolean(djm_v10_addon);
   const total_price = PRICING[package_type] * durationHours + (djmAddon ? PRICING.djm_v10_addon * durationHours : 0);
   const duration_hours = Number(durationHours.toFixed(2));
