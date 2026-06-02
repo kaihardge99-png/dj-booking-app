@@ -8,6 +8,8 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
   const [calendarStatus, setCalendarStatus] = useState({ googleCalendarLinked: false, authMode: 'none' });
   const [calendarUnavailableDates, setCalendarUnavailableDates] = useState([]);
   const [newBlockedDate, setNewBlockedDate] = useState('');
+  const [newBlockedStartTime, setNewBlockedStartTime] = useState('');
+  const [newBlockedEndTime, setNewBlockedEndTime] = useState('');
   const [newBlockedReason, setNewBlockedReason] = useState('');
   const [stats, setStats] = useState({
     total: 0,
@@ -99,13 +101,18 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
         body: JSON.stringify({
           date: newBlockedDate,
           reason: newBlockedReason,
+          start_time: newBlockedStartTime || null,
+          end_time: newBlockedEndTime || null,
         }),
       });
 
       if (response.ok) {
         setNewBlockedDate('');
+        setNewBlockedStartTime('');
+        setNewBlockedEndTime('');
         setNewBlockedReason('');
         fetchBlockedDates();
+        fetchCalendarAvailability();
         onBlockedDatesUpdate();
       }
     } catch (error) {
@@ -268,6 +275,24 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                   />
                 </div>
                 <div className="form-group">
+                  <label htmlFor="blocked_start_time">Start Time (Optional)</label>
+                  <input
+                    type="time"
+                    id="blocked_start_time"
+                    value={newBlockedStartTime}
+                    onChange={(e) => setNewBlockedStartTime(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="blocked_end_time">End Time (Optional)</label>
+                  <input
+                    type="time"
+                    id="blocked_end_time"
+                    value={newBlockedEndTime}
+                    onChange={(e) => setNewBlockedEndTime(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
                   <label htmlFor="blocked_reason">Reason (Optional)</label>
                   <input
                     type="text"
@@ -291,6 +316,11 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                   <div key={item.id} className="blocked-date-item unavailable-date-item">
                     <div className="date-info">
                       <strong>{item.date}</strong>
+                      {item.start_time && item.end_time ? (
+                        <span className="reason">{item.start_time} - {item.end_time}</span>
+                      ) : (
+                        <span className="reason">Full day</span>
+                      )}
                       {item.reason && <span className="reason">{item.reason}</span>}
                     </div>
                     <button

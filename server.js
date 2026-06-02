@@ -107,6 +107,24 @@ const createPostgresDb = () => {
 
 const db = usePostgres ? createPostgresDb() : createSqliteDb();
 
+const ensureBlockedDatesColumns = async () => {
+  if (usePostgres) {
+    await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS start_time TEXT;');
+    await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS end_time TEXT;');
+  } else {
+    try {
+      await db.exec('ALTER TABLE blocked_dates ADD COLUMN start_time TEXT');
+    } catch (err) {
+      // Column already exists
+    }
+    try {
+      await db.exec('ALTER TABLE blocked_dates ADD COLUMN end_time TEXT');
+    } catch (err) {
+      // Column already exists
+    }
+  }
+};
+
 const sqliteSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,6 +157,8 @@ const sqliteSchema = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL UNIQUE,
     reason TEXT,
+    start_time TEXT,
+    end_time TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `;
@@ -173,6 +193,8 @@ const postgresSchemaStatements = [
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL UNIQUE,
     reason TEXT,
+    start_time TEXT,
+    end_time TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
 ];
@@ -185,6 +207,8 @@ const initializeDatabase = async () => {
   } else {
     await db.exec(sqliteSchema);
   }
+
+  await ensureBlockedDatesColumns();
 };
 
 // Email configuration
@@ -232,7 +256,7 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
     return { slots: [], isUnavailable: true };
   }
 
-  if (blockedDatesRows.some((row) => row.date === date)) {
+  if (blockedDatesRows.some((row) => row.date === date && (!row.start_time || !row.end_time))) {
     return { slots: [], isUnavailable: true };
   }
 
@@ -259,6 +283,23 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
     })
     .filter(Boolean);
 
+  const blockedBusy = blockedDatesRows
+    .filter((row) => row.date === date)
+    .map((row) => {
+      if (!row.start_time || !row.end_time) {
+        return { fullDay: true };
+      }
+      const start = toMinutes(row.start_time);
+      const end = toMinutes(row.end_time);
+      if (start === null || end === null || start >= end) return null;
+      return { start, end };
+    })
+    .filter(Boolean);
+
+  if (blockedBusy.some((range) => range.fullDay)) {
+    return { slots: [], isUnavailable: true };
+  }
+
   const bookingBusy = bookingRows
     .map((row) => {
       const start = toMinutes(row.start_time);
@@ -268,7 +309,8 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
     })
     .filter(Boolean);
 
-  const busyRanges = [...googleBusy, ...bookingBusy];
+  const blockedRanges = blockedBusy.map((range) => ({ start: range.start, end: range.end })).filter(Boolean);
+  const busyRanges = [...googleBusy, ...bookingBusy, ...blockedRanges];
 
   const slots = [];
   for (let slotStart = openMinutes; slotStart < closeMinutes; slotStart += 60) {
@@ -905,14 +947,26 @@ app.get('/api/availability', async (req, res) => {
 // Add blocked date
 app.post('/api/blocked-dates', async (req, res) => {
   try {
-    const { date, reason } = req.body;
+    const { date, reason, start_time, end_time } = req.body;
 
     if (!date) {
       return res.status(400).json({ error: 'Date is required' });
     }
 
-    const stmt = db.prepare('INSERT INTO blocked_dates (date, reason) VALUES (?, ?)');
-    const result = await stmt.run(date, reason);
+    if ((start_time && !end_time) || (!start_time && end_time)) {
+      return res.status(400).json({ error: 'Both start_time and end_time are required for partial-day blocks' });
+    }
+
+    if (start_time && end_time) {
+      const start = toMinutes(start_time);
+      const end = toMinutes(end_time);
+      if (start === null || end === null || start >= end) {
+        return res.status(400).json({ error: 'Invalid start_time or end_time' });
+      }
+    }
+
+    const stmt = db.prepare('INSERT INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
+    const result = await stmt.run(date, reason || null, start_time || null, end_time || null);
 
     res.status(201).json({ id: result.lastInsertRowid });
   } catch (error) {
