@@ -30,14 +30,16 @@ function App() {
   }, []);
 
   useEffect(() => {
-    fetchBlockedDates();
-  }, []);
+    if (currentPage === 'booking') {
+      fetchBlockedDates();
+    }
+  }, [currentPage]);
 
   const fetchBlockedDates = async () => {
     try {
       const response = await fetch('/api/blocked-dates');
       const data = await response.json();
-      setBlockedDates(data.map(d => d.date));
+      setBlockedDates(data.map((d) => d.date));
     } catch (error) {
       console.error('Error fetching blocked dates:', error);
     }
