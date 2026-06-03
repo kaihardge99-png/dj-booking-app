@@ -125,6 +125,19 @@ const ensureBlockedDatesColumns = async () => {
   }
 };
 
+const ensureBookingUsernameColumn = async () => {
+  if (usePostgres) {
+    await db.exec('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_username TEXT;');
+  } else {
+    const columns = await db.prepare("PRAGMA table_info(bookings);").all();
+    const columnNames = columns.map((col) => col.name);
+
+    if (!columnNames.includes('booking_username')) {
+      await db.exec('ALTER TABLE bookings ADD COLUMN booking_username TEXT');
+    }
+  }
+};
+
 const getSetting = async (key, defaultValue) => {
   try {
     const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
@@ -261,6 +274,7 @@ const initializeDatabase = async () => {
   }
 
   await ensureBlockedDatesColumns();
+  await ensureBookingUsernameColumn();
 };
 
 // Email configuration
@@ -1026,13 +1040,14 @@ app.post('/api/bookings', async (req, res) => {
   const total_price = PRICING[package_type] * durationHours + (djmAddon ? PRICING.djm_v10_addon * durationHours : 0);
   const duration_hours = Number(durationHours.toFixed(2));
   const djm_v10 = djmAddon ? 1 : 0;
+  const booking_username = req.body.booking_username || req.body.username || user_name;
 
   try {
     const stmt = db.prepare(`
       INSERT INTO bookings (
         user_name, user_email, user_phone, booking_date, start_time, end_time,
-        duration_hours, package_type, cdj_count, mixer_type, djm_v10_addon, notes, total_price
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        duration_hours, package_type, cdj_count, mixer_type, djm_v10_addon, notes, total_price, booking_username
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = await stmt.run(
@@ -1048,7 +1063,8 @@ app.post('/api/bookings', async (req, res) => {
       mixer_type,
       djm_v10,
       notes,
-      total_price
+      total_price,
+      booking_username
     );
 
     // Send confirmation email to user
@@ -1378,8 +1394,10 @@ app.get('/api/bookings/user/:username', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    const stmt = db.prepare('SELECT * FROM bookings WHERE user_name = ? ORDER BY booking_date DESC');
-    const rows = await stmt.all(username);
+    const stmt = db.prepare(
+      'SELECT * FROM bookings WHERE booking_username = ? OR user_name = ? ORDER BY booking_date DESC'
+    );
+    const rows = await stmt.all(username, username);
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });

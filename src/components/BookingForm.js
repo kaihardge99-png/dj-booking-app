@@ -226,6 +226,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
     const bookingData = {
       ...formData,
       duration_hours: durationHours,
+      booking_username: username,
     };
 
     try {
