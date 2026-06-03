@@ -15,7 +15,6 @@ const OPERATING_HOURS = {
 const PRICING = {
   package1: 50,
   package2: 100,
-  djm_v10_addon: 15,
 };
 
 function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, userToken }) {
@@ -29,7 +28,6 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
     package_type: 'package1',
     cdj_count: 2,
     mixer_type: 'DJM A9',
-    djm_v10_addon: false,
     notes: '',
   });
 
@@ -56,7 +54,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
 
   useEffect(() => {
     calculatePrice();
-  }, [formData.start_time, formData.end_time, formData.package_type, formData.djm_v10_addon]);
+  }, [formData.start_time, formData.end_time, formData.package_type]);
 
   // Prefill user name and email when logged in
   useEffect(() => {
@@ -99,11 +97,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
     }
 
     const durationHours = (endMinutes - startMinutes) / 60;
-    let price = PRICING[formData.package_type] * durationHours;
-
-    if (formData.djm_v10_addon) {
-      price += PRICING.djm_v10_addon * durationHours;
-    }
+    const price = PRICING[formData.package_type] * durationHours;
 
     setTotalPrice(price);
   };
@@ -391,7 +385,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
 
           {/* Package Selection */}
           <fieldset>
-            <legend>Package & Equipment</legend>
+            <legend>Package Selection</legend>
 
             <div className="form-group">
               <label htmlFor="package_type">Package *</label>
@@ -401,9 +395,14 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                 value={formData.package_type}
                 onChange={handleChange}
               >
-                <option value="package1">Standard - $50/hr (CDJ3000 x2-4, Mixer, 2x QSC K12)</option>
-                <option value="package2">Premium - $100/hr (All above + Recording, Video, Lighting)</option>
+                <option value="package1">Standard - $50/hr</option>
+                <option value="package2">Premium - $100/hr</option>
               </select>
+            </div>
+            <div className="package-blurb">
+              <p><strong>Standard Package</strong> — $50/hr: includes a full practice session with 2-4x CDJ3000 decks, your chosen DJ mixer, 2x QSC K12 speakers, and a complete sound setup.</p>
+              <p><strong>Premium Package</strong> — $100/hr: includes everything in the Standard Package plus professional multi-camera recording, video capture, and studio-style lighting.</p>
+              <p className="package-note"><strong>Note:</strong> Mixer selection and CDJ count are chosen separately below.</p>
             </div>
 
             <div className="form-row">
@@ -433,20 +432,9 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                 >
                   <option value="DJM A9">DJM A9</option>
                   <option value="Xone 96">Xone 96</option>
-                  <option value="Xone 92">Xone 92</option>
+                  <option value="DJM V10">DJM V10</option>
                 </select>
               </div>
-            </div>
-
-            <div className="form-group checkbox">
-              <input
-                type="checkbox"
-                id="djm_v10_addon"
-                name="djm_v10_addon"
-                checked={formData.djm_v10_addon}
-                onChange={handleChange}
-              />
-              <label htmlFor="djm_v10_addon">Add DJM V10 Mixer (+$15/hr)</label>
             </div>
           </fieldset>
 
@@ -476,12 +464,6 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
               </span>
               <span>${PRICING[formData.package_type]}/hr</span>
             </div>
-            {formData.djm_v10_addon && (
-              <div className="price-row">
-                <span>DJM V10 Add-on</span>
-                <span>${PRICING.djm_v10_addon}/hr</span>
-              </div>
-            )}
             <div className="price-row total">
               <span>Total</span>
               <span>${totalPrice.toFixed(2)}</span>
