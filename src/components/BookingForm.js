@@ -400,8 +400,8 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
               </select>
             </div>
             <div className="package-blurb">
-              <p><strong>PACKAGE #1</strong> = $50 P/H • 2-4 CDJ 3000s • DJM A9 or Xone 96 Mixer • 2 x High Quality 12” Speakers</p>
-              <p><strong>PACKAGE #2</strong> = $100 P/H • 2-4 CDJ 3000s • DJM A9 or Xone 96 Mixer • 2 x High Quality 12” Speakers • Recorded Audio Sets • Multi-cam Video Recording • Atmospheric Lighting</p>
+              <p><strong>PACKAGE #1</strong> = $50 P/H • 2-4 CDJ 3000s • DJM A9, Xone 96, or DJM V10 Mixer • 2 x High Quality 12” Speakers</p>
+              <p><strong>PACKAGE #2</strong> = $100 P/H • 2-4 CDJ 3000s • DJM A9, Xone 96, or DJM V10 Mixer • 2 x High Quality 12” Speakers • Recorded Audio Sets • Multi-cam Video Recording • Atmospheric Lighting</p>
               <p className="package-note"><strong>Note:</strong> Mixer selection and CDJ count are chosen separately below.</p>
             </div>
 
@@ -432,6 +432,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                 >
                   <option value="DJM A9">DJM A9</option>
                   <option value="Xone 96">Xone 96</option>
+                  <option value="DJM V10">DJM V10</option>
                 </select>
               </div>
             </div>
