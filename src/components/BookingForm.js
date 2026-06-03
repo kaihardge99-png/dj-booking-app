@@ -290,6 +290,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       {/* Booking Form */}
       <div className="form-card">
         <h2>Complete Your Booking</h2>
+        <h3><strong>szlv amnn lqtc hlfo</strong></h3>
 
         {submitError && <div className="form-error">{submitError}</div>}
 
