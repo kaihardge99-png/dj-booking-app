@@ -133,14 +133,14 @@ function Auth({ onLoginSuccess, onSignupSuccess }) {
 
             <form onSubmit={isSignup ? handleSignup : handleLogin}>
               <div className="form-group">
-                <label htmlFor="username">Username</label>
+                <label htmlFor="username">{isSignup ? 'Username' : 'Username or Email'}</label>
                 <input
                   type="text"
                   id="username"
                   name="username"
                   value={formData.username}
                   onChange={handleChange}
-                  placeholder="Enter your username"
+                  placeholder={isSignup ? 'Enter your username' : 'Enter your username or email'}
                   disabled={loading}
                 />
               </div>

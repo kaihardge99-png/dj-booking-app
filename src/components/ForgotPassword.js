@@ -24,6 +24,9 @@ function ForgotPassword({ onBack }) {
 
       if (response.ok) {
         setMessage('Password reset link sent to your email. Please check your inbox.');
+        if (data.debugResetLink) {
+          setMessage(`Password reset link: ${data.debugResetLink}`);
+        }
         setEmail('');
       } else {
         setError(data.error || 'Failed to send reset link');

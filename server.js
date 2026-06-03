@@ -756,23 +756,24 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    const identifier = (username || '').trim();
 
-    if (!username || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Find user
-    const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
-    const user = await stmt.get(username);
+    // Find user by username or email
+    const stmt = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?');
+    const user = await stmt.get(identifier, identifier);
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid username or password' });
+      return res.status(401).json({ error: 'Invalid username, email or password' });
     }
 
     // Check password
     const passwordMatch = bcrypt.compareSync(password, user.password);
     if (!passwordMatch) {
-      return res.status(401).json({ error: 'Invalid username or password' });
+      return res.status(401).json({ error: 'Invalid username, email or password' });
     }
 
     // Create JWT token
@@ -843,15 +844,24 @@ app.post('/api/forgot-password', async (req, res) => {
       `,
     };
 
+    let resetResponse = { message: 'If an account exists with this email, a reset link has been sent.' };
+    const debugMode = !isProd || !process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD;
+
     transporter.sendMail(mailOptions, (err, info) => {
       if (err) {
         console.error('Error sending reset email:', err.message);
+        if (debugMode) {
+          resetResponse.debugResetLink = resetLink;
+        }
       } else {
         console.log('Password reset email sent to:', email);
+        if (debugMode) {
+          resetResponse.debugResetLink = resetLink;
+        }
       }
     });
 
-    res.json({ message: 'If an account exists with this email, a reset link has been sent.' });
+    res.json(resetResponse);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
