@@ -395,13 +395,13 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                 value={formData.package_type}
                 onChange={handleChange}
               >
-                <option value="package1">Standard - $50/hr</option>
-                <option value="package2">Premium - $100/hr</option>
+                <option value="package1">PACKAGE #1 - $50 P/H</option>
+                <option value="package2">PACKAGE #2 - $100 P/H</option>
               </select>
             </div>
             <div className="package-blurb">
-              <p><strong>Standard Package</strong> — $50/hr: includes a full practice session with 2-4x CDJ3000 decks, your chosen DJ mixer, 2x QSC K12 speakers, and a complete sound setup.</p>
-              <p><strong>Premium Package</strong> — $100/hr: includes everything in the Standard Package plus professional multi-camera recording, video capture, and studio-style lighting.</p>
+              <p><strong>PACKAGE #1</strong> = $50 P/H • 2-4 CDJ 3000s • DJM A9 or Xone 96 Mixer • 2 x High Quality 12” Speakers</p>
+              <p><strong>PACKAGE #2</strong> = $100 P/H • 2-4 CDJ 3000s • DJM A9 or Xone 96 Mixer • 2 x High Quality 12” Speakers • Recorded Audio Sets • Multi-cam Video Recording • Atmospheric Lighting</p>
               <p className="package-note"><strong>Note:</strong> Mixer selection and CDJ count are chosen separately below.</p>
             </div>
 
@@ -432,7 +432,6 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                 >
                   <option value="DJM A9">DJM A9</option>
                   <option value="Xone 96">Xone 96</option>
-                  <option value="DJM V10">DJM V10</option>
                 </select>
               </div>
             </div>
@@ -460,7 +459,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
             <h3>Price Summary</h3>
             <div className="price-row">
               <span>
-                {formData.package_type === 'package1' ? 'Standard Package' : 'Premium Package'}
+                {formData.package_type === 'package1' ? 'PACKAGE #1' : 'PACKAGE #2'}
               </span>
               <span>${PRICING[formData.package_type]}/hr</span>
             </div>
