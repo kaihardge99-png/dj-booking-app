@@ -363,7 +363,8 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                   id="start_time"
                   name="start_time"
                   value={formData.start_time}
-                  onChange={handleChange}
+                  readOnly
+                  placeholder="Choose a start time from the calendar above"
                   className={errors.start_time ? 'error' : ''}
                 />
                 {errors.start_time && <span className="error-text">{errors.start_time}</span>}
@@ -376,7 +377,8 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
                   id="end_time"
                   name="end_time"
                   value={formData.end_time}
-                  onChange={handleChange}
+                  readOnly
+                  placeholder="Choose an end time from the calendar above"
                   className={errors.end_time ? 'error' : ''}
                 />
                 {errors.end_time && <span className="error-text">{errors.end_time}</span>}
