@@ -35,8 +35,16 @@ if (!process.env.JWT_SECRET) {
 app.use(cors());
 app.use(express.json());
 
-app.get(/^\/admin(\/.*)?$/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Serve the React admin app for any /admin path without using express route patterns
+app.use((req, res, next) => {
+  try {
+    if (req.path && req.path.startsWith('/admin')) {
+      return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
+  } catch (err) {
+    console.error('Error serving admin app:', err && err.message);
+  }
+  next();
 });
 
 app.use(express.static('public'));
