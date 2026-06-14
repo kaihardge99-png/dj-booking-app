@@ -1283,8 +1283,23 @@ app.get('/api/availability', async (req, res) => {
     await syncCalendarEventsAndBlockDeleted(googleEvents);
 
     // Re-fetch blocked dates after sync
-    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time FROM blocked_date_segments WHERE date >= ? AND date <= ?');
+    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time, reason FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time, reason FROM blocked_date_segments WHERE date >= ? AND date <= ?');
     const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate, startDate, endDate);
+
+    const fullDayBlockedDates = [];
+    const partialBlockedSegments = [];
+    for (const row of blockedRowsAfterSync) {
+      if (!row.start_time && !row.end_time) {
+        fullDayBlockedDates.push(row.date);
+      } else if (row.start_time && row.end_time) {
+        partialBlockedSegments.push({
+          date: row.date,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          reason: row.reason || null,
+        });
+      }
+    }
 
     const unavailableDates = [];
     const slotsByDate = {};
@@ -1305,6 +1320,8 @@ app.get('/api/availability', async (req, res) => {
       month,
       unavailableDates,
       slotsByDate,
+      fullDayBlockedDates,
+      partialBlockedSegments,
       source: {
         googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL),
         authMode: GOOGLE_SERVICE_ACCOUNT_JSON ? 'adc_service_account' : GOOGLE_API_KEY ? 'api_key' : GOOGLE_CALENDAR_ICS_URL ? 'ics_url' : 'none',

@@ -39,7 +39,11 @@ function App() {
     try {
       const response = await fetch('/api/blocked-dates');
       const data = await response.json();
-      setBlockedDates(data.map((d) => d.date));
+      setBlockedDates(
+        data
+          .filter((d) => !d.start_time && !d.end_time)
+          .map((d) => d.date),
+      );
     } catch (error) {
       console.error('Error fetching blocked dates:', error);
     }

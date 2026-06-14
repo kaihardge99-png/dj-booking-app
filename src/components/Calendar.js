@@ -6,6 +6,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
   const [availableTimes, setAvailableTimes] = useState([]);
   const [apiUnavailableDates, setApiUnavailableDates] = useState([]);
   const [apiSlotsByDate, setApiSlotsByDate] = useState({});
+  const [apiFullDayBlockedDates, setApiFullDayBlockedDates] = useState([]);
+  const [apiPartialBlockedSegments, setApiPartialBlockedSegments] = useState([]);
   const [googleCalendarStatus, setGoogleCalendarStatus] = useState({ linked: false, authMode: 'none' });
   const [maxBookingDays, setMaxBookingDays] = useState(30);
 
@@ -43,6 +45,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
         const data = await response.json();
         setApiUnavailableDates(data.unavailableDates || []);
         setApiSlotsByDate(data.slotsByDate || {});
+        setApiFullDayBlockedDates(data.fullDayBlockedDates || []);
+        setApiPartialBlockedSegments(data.partialBlockedSegments || []);
         setGoogleCalendarStatus({
           linked: Boolean(data.source?.googleCalendarLinked),
           authMode: data.source?.authMode || 'none',
@@ -95,7 +99,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
 
   const isDateBlocked = (day) => {
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return blockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr) || isBeyondMaxDate(day);
+    return blockedDates.includes(dateStr) || apiFullDayBlockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr) || isBeyondMaxDate(day);
   };
 
   const isBeyondMaxDate = (day) => {
