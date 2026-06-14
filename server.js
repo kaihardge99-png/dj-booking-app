@@ -1524,7 +1524,8 @@ app.get('/api/calendar-ignores', basicAuthMiddleware, async (req, res) => {
   }
 });
 
-app.get('/admin', basicAuthMiddleware, (req, res) => {
+// Serve admin UI without Basic Auth so the login page can be used
+app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
 });
 
