@@ -1091,10 +1091,16 @@ app.post('/api/bookings', async (req, res) => {
         const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
         const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
         const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-        for (const event of calendarEvents) {
-          const eventRange = getEventRangeForDate(booking_date, event);
-          if (eventRange && overlap(bookingStart, bookingEnd, eventRange.start, eventRange.end)) {
-            return res.status(400).json({ error: 'This booking overlaps a busy Google Calendar event' });
+
+        // If this date is configured to ignore Google Calendar, skip overlap checks
+        const ignoreStmt2 = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
+        const ignoreRows2 = await ignoreStmt2.all(booking_date);
+        if (ignoreRows2.length === 0) {
+          for (const event of calendarEvents) {
+            const eventRange = getEventRangeForDate(booking_date, event);
+            if (eventRange && overlap(bookingStart, bookingEnd, eventRange.start, eventRange.end)) {
+              return res.status(400).json({ error: 'This booking overlaps a busy Google Calendar event' });
+            }
           }
         }
       } catch (err) {
