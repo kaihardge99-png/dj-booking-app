@@ -1516,6 +1516,18 @@ app.get('/api/debug-availability', async (req, res) => {
   }
 });
 
+// Debug endpoint: check slot availability using server-side validation
+app.get('/api/debug-slot-available', async (req, res) => {
+  try {
+    const { date, start_time, end_time } = req.query;
+    if (!date || !start_time || !end_time) return res.status(400).json({ error: 'date, start_time and end_time required' });
+    const ok = await isSlotAvailableForBooking(date, start_time, end_time);
+    return res.json({ date, start_time, end_time, available: ok });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Admin login
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
