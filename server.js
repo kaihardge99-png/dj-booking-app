@@ -10,7 +10,6 @@ const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
-console.log('Starting server process - deploy check');
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
@@ -1573,45 +1572,7 @@ app.put('/api/blocked-dates/:id', async (req, res) => {
   }
 });
 
-// Debug endpoint: show computed availability inputs for a single date
-app.get('/api/debug-availability', async (req, res) => {
-  try {
-    const { date } = req.query;
-    if (!date) return res.status(400).json({ error: 'date query is required YYYY-MM-DD' });
-
-    const blockedStmt = db.prepare('SELECT date, start_time, end_time, reason FROM blocked_dates WHERE date = ? UNION ALL SELECT date, start_time, end_time, reason FROM blocked_date_segments WHERE date = ?');
-    const blockedRows = await blockedStmt.all(date, date);
-
-    const bookingsStmt = db.prepare('SELECT booking_date, start_time, end_time, status FROM bookings WHERE booking_date = ?');
-    const bookingRows = await bookingsStmt.all(date);
-
-    const dayStartIso = new Date(`${date}T00:00:00`).toISOString();
-    const dayEndIso = new Date(`${date}T23:59:59`).toISOString();
-    const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-    const dayEvents = filterEventsForDate(date, googleEvents);
-
-    const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
-    const ignoreRows = await ignoreStmt.all(date);
-
-    const availability = await listDateAvailability(date, blockedRows, bookingRows, ignoreRows.length ? [] : dayEvents);
-
-    return res.json({ date, blockedRows, bookingRows, dayEvents, ignore: ignoreRows.length > 0, availability });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// Debug endpoint: check slot availability using server-side validation
-app.get('/api/debug-slot-available', async (req, res) => {
-  try {
-    const { date, start_time, end_time } = req.query;
-    if (!date || !start_time || !end_time) return res.status(400).json({ error: 'date, start_time and end_time required' });
-    const ok = await isSlotAvailableForBooking(date, start_time, end_time);
-    return res.json({ date, start_time, end_time, available: ok });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
+// (debug endpoints removed)
 
 // Admin login
 app.post('/api/admin/login', (req, res) => {
