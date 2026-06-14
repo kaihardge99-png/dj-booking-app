@@ -10,6 +10,7 @@ const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
+console.log('Starting server process - deploy check');
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
