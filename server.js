@@ -35,7 +35,7 @@ if (!process.env.JWT_SECRET) {
 app.use(cors());
 app.use(express.json());
 
-app.get(['/admin', '/admin/*'], (req, res) => {
+app.get(/^\/admin(\/.*)?$/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
