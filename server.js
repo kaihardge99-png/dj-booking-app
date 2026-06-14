@@ -307,6 +307,28 @@ const initializeDatabase = async () => {
   await ensureBookingUsernameColumn();
 };
 
+// Periodic calendar sync: poll Google Calendar and sync cache/blocks so edits appear automatically
+const startCalendarPolling = (intervalMinutes = 5) => {
+  const run = async () => {
+    try {
+      const now = new Date();
+      const timeMin = now.toISOString();
+      const future = new Date(now);
+      future.setDate(future.getDate() + 30);
+      const timeMax = future.toISOString();
+      const events = await fetchGoogleCalendarEvents(timeMin, timeMax);
+      await syncCalendarEventsAndBlockDeleted(events);
+      console.log('Calendar sync completed', new Date().toISOString());
+    } catch (err) {
+      console.error('Periodic calendar sync error:', err.message);
+    }
+  };
+
+  // Run immediately and then on interval
+  run();
+  setInterval(run, intervalMinutes * 60 * 1000);
+};
+
 // Email configuration
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -1458,6 +1480,68 @@ app.delete('/api/calendar-ignore/:date', async (req, res) => {
   }
 });
 
+// List calendar ignores
+app.get('/api/calendar-ignores', async (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT id, date, reason, created_at FROM calendar_ignores ORDER BY date');
+    const rows = await stmt.all();
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Simple admin UI for managing calendar ignores (no-auth, for quick access)
+app.get('/admin', (req, res) => {
+  res.send(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Admin - Calendar Ignores</title>
+        <style>body{font-family:Arial,sans-serif;padding:20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
+      </head>
+      <body>
+        <h2>Calendar Ignores</h2>
+        <p>Ignore Google Calendar events for specific dates (useful to override calendar for special days).</p>
+        <div>
+          <input id="date" type="date" />
+          <input id="reason" placeholder="Reason (optional)" />
+          <button id="add">Add Ignore</button>
+        </div>
+        <h3>Existing Ignores</h3>
+        <div id="list">Loading...</div>
+        <script>
+          async function load(){
+            const r=await fetch('/api/calendar-ignores');
+            const data=await r.json();
+            const div=document.getElementById('list');
+            if(data.length===0){div.innerHTML='<p><em>None</em></p>';return}
+            let html='<table><tr><th>Date</th><th>Reason</th><th>Action</th></tr>';
+            for(const row of data){
+              html+=`<tr><td>${row.date}</td><td>${row.reason||''}</td><td><button data-date="${row.date}" class="del">Delete</button></td></tr>`;
+            }
+            html+='</table>';
+            div.innerHTML=html;
+            for(const b of document.querySelectorAll('.del')){
+              b.onclick=async ()=>{ if(!confirm('Delete ignore for '+b.dataset.date+'?')) return; await fetch('/api/calendar-ignore/'+b.dataset.date,{method:'DELETE'}); load(); }
+            }
+          }
+          document.getElementById('add').onclick=async ()=>{
+            const date=document.getElementById('date').value;
+            const reason=document.getElementById('reason').value;
+            if(!date){alert('Choose a date');return}
+            await fetch('/api/calendar-ignore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date,reason})});
+            document.getElementById('date').value='';document.getElementById('reason').value='';
+            load();
+          }
+          load();
+        </script>
+      </body>
+    </html>
+  `);
+});
+
 app.put('/api/blocked-dates/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1665,6 +1749,9 @@ app.put('/api/user/update/:username', verifyToken, async (req, res) => {
 
 // Start server
 initializeDatabase().then(() => {
+  // start periodic calendar polling (keeps Google edits synced automatically)
+  startCalendarPolling(5);
+
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
