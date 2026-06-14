@@ -1496,9 +1496,12 @@ const path = require('path');
 
 // Basic admin auth middleware (uses ADMIN_PASSWORD env var)
 const getAdminPassword = () => {
-  if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD;
-  if (!isProd) return 'admin123';
-  return null;
+  const envPass = process.env.ADMIN_PASSWORD;
+  if (envPass) return envPass;
+  if (isProd) {
+    console.warn('Warning: ADMIN_PASSWORD not set in production; using default password. Set ADMIN_PASSWORD to secure admin endpoints.');
+  }
+  return 'admin123';
 };
 
 const basicAuthMiddleware = (req, res, next) => {
