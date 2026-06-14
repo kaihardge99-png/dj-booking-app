@@ -737,6 +737,22 @@ const parseDurationHours = (start_time, end_time) => {
   return (endMinutes - startMinutes) / 60;
 };
 
+const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => {
+  const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date = ? UNION ALL SELECT date, start_time, end_time FROM blocked_date_segments WHERE date = ?');
+  const blockedRows = await blockedStmt.all(booking_date, booking_date);
+
+  const existingBookingsStmt = db.prepare('SELECT start_time, end_time FROM bookings WHERE booking_date = ? AND status != ?');
+  const existingBookings = await existingBookingsStmt.all(booking_date, 'cancelled');
+
+  const dayStartIso = new Date(`${booking_date}T00:00:00`).toISOString();
+  const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
+  const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+  const calendarEvents = filterEventsForDate(booking_date, googleEvents);
+
+  const availability = await listDateAvailability(booking_date, blockedRows, existingBookings, calendarEvents);
+  return availability.slots.includes(start_time);
+};
+
 // Authentication Routes
 
 // User Signup
@@ -1037,6 +1053,10 @@ app.post('/api/bookings', async (req, res) => {
           if (blockedStart !== null && blockedEnd !== null && overlap(bookingStart, bookingEnd, blockedStart, blockedEnd)) {
             return res.status(400).json({ error: 'This booking overlaps a blocked time range' });
           }
+        }
+        const slotOk = await isSlotAvailableForBooking(booking_date, start_time, end_time);
+        if (!slotOk) {
+          return res.status(400).json({ error: 'Selected start time is not available on this date' });
         }
 
         const existingBookingsStmt = db.prepare('SELECT start_time, end_time FROM bookings WHERE booking_date = ? AND status != ?');
