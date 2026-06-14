@@ -26,7 +26,7 @@ services:
       - key: GOOGLE_CALENDAR_ICS_URL
         sync: false
       - key: ADMIN_PASSWORD
-        value: Admin123
+        value: admin123
 
 databases:
   - name: dj-booking-db-kai99
