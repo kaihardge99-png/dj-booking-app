@@ -1455,7 +1455,7 @@ app.delete('/api/blocked-dates/:id', async (req, res) => {
 });
 
 // Add calendar ignore (ignore Google Calendar events for a specific date)
-app.post('/api/calendar-ignore', async (req, res) => {
+app.post('/api/calendar-ignore', basicAuthMiddleware, async (req, res) => {
   try {
     const { date, reason } = req.body;
     if (!date) return res.status(400).json({ error: 'Date is required' });
@@ -1469,7 +1469,7 @@ app.post('/api/calendar-ignore', async (req, res) => {
 });
 
 // Remove calendar ignore for a date
-app.delete('/api/calendar-ignore/:date', async (req, res) => {
+app.delete('/api/calendar-ignore/:date', basicAuthMiddleware, async (req, res) => {
   try {
     const { date } = req.params;
     const del = db.prepare('DELETE FROM calendar_ignores WHERE date = ?');
@@ -1481,7 +1481,7 @@ app.delete('/api/calendar-ignore/:date', async (req, res) => {
 });
 
 // List calendar ignores
-app.get('/api/calendar-ignores', async (req, res) => {
+app.get('/api/calendar-ignores', basicAuthMiddleware, async (req, res) => {
   try {
     const stmt = db.prepare('SELECT id, date, reason, created_at FROM calendar_ignores ORDER BY date');
     const rows = await stmt.all();
@@ -1494,7 +1494,34 @@ app.get('/api/calendar-ignores', async (req, res) => {
 // Simple admin UI for managing calendar ignores (no-auth, for quick access)
 const path = require('path');
 
-app.get('/admin', (req, res) => {
+// Basic admin auth middleware (uses ADMIN_PASSWORD env var)
+const getAdminPassword = () => {
+  if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD;
+  if (!isProd) return 'admin123';
+  return null;
+};
+
+const basicAuthMiddleware = (req, res, next) => {
+  const adminPass = getAdminPassword();
+  if (!adminPass) return res.status(500).json({ error: 'Admin password not configured' });
+
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const creds = Buffer.from(auth.split(' ')[1], 'base64').toString('utf8');
+  const [user, pass] = creds.split(':');
+  if (user !== 'admin' || pass !== adminPass) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  next();
+};
+
+app.get('/admin', basicAuthMiddleware, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
 });
 
