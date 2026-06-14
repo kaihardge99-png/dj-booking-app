@@ -16,6 +16,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
   const [editingBlockedStartTime, setEditingBlockedStartTime] = useState('');
   const [editingBlockedEndTime, setEditingBlockedEndTime] = useState('');
   const [editingBlockedReason, setEditingBlockedReason] = useState('');
+  const [importJsonText, setImportJsonText] = useState('');
   const [stats, setStats] = useState({
     total: 0,
     confirmed: 0,
@@ -231,6 +232,35 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     }
   };
 
+  const handleImportBulk = async () => {
+    if (!importJsonText) {
+      alert('Paste JSON array of blocked dates/segments into the box first');
+      return;
+    }
+
+    try {
+      const items = JSON.parse(importJsonText);
+      const response = await fetch('/api/blocked-dates/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(items),
+      });
+
+      if (response.ok) {
+        setImportJsonText('');
+        fetchBlockedDates();
+        fetchCalendarAvailability();
+        onBlockedDatesUpdate();
+        alert('Imported successfully');
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Import failed');
+      }
+    } catch (err) {
+      alert('Invalid JSON: ' + err.message);
+    }
+  };
+
   return (
     <div className="admin-dashboard-container">
       <div className="dashboard-card">
@@ -407,6 +437,19 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                 </button>
               </div>
             </form>
+
+            <div className="bulk-import">
+              <h4>Bulk import unavailable dates</h4>
+              <p>Paste a JSON array of objects: {`[{"date":"2026-06-02","start_time":"15:00","end_time":"16:00"}, {"date":"2026-06-07"}]`}</p>
+              <textarea
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder='Paste JSON array here'
+                rows={6}
+                style={{ width: '100%' }}
+              />
+              <button type="button" className="import-btn" onClick={handleImportBulk}>Import</button>
+            </div>
 
             {blockedDates.length === 0 ? (
               <p className="no-data">No unavailable dates</p>

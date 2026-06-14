@@ -195,6 +195,15 @@ const sqliteSchema = `
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS blocked_date_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    reason TEXT,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS calendar_events_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_uid TEXT UNIQUE,
@@ -245,6 +254,14 @@ const postgresSchemaStatements = [
     reason TEXT,
     start_time TEXT,
     end_time TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS blocked_date_segments (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    reason TEXT,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS calendar_events_cache (
@@ -1009,8 +1026,8 @@ app.post('/api/bookings', async (req, res) => {
       }
 
       try {
-        const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date = ?');
-        const blockedRows = await blockedStmt.all(booking_date);
+        const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date = ? UNION ALL SELECT date, start_time, end_time FROM blocked_date_segments WHERE date = ?');
+        const blockedRows = await blockedStmt.all(booking_date, booking_date);
         for (const blocked of blockedRows) {
           if (!blocked.start_time || !blocked.end_time) {
             return res.status(400).json({ error: 'This date has been blocked and is not available for booking' });
@@ -1189,9 +1206,45 @@ app.put('/api/bookings/:id', async (req, res) => {
 // Get blocked dates
 app.get('/api/blocked-dates', async (req, res) => {
   try {
-    const stmt = db.prepare('SELECT * FROM blocked_dates ORDER BY date');
+    const stmt = db.prepare(`
+      SELECT id, date, reason, start_time, end_time, created_at, 'blocked' AS source
+      FROM blocked_dates
+      UNION ALL
+      SELECT id, date, reason, start_time, end_time, created_at, 'segment' AS source
+      FROM blocked_date_segments
+      ORDER BY date
+    `);
     const rows = await stmt.all();
     res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk import blocked dates/segments
+app.post('/api/blocked-dates/bulk', async (req, res) => {
+  try {
+    const items = req.body;
+    if (!Array.isArray(items)) return res.status(400).json({ error: 'Expected an array of blocked date items' });
+
+    const inserted = [];
+    for (const it of items) {
+      const { date, reason, start_time, end_time } = it;
+      if (!date) continue;
+      if ((start_time && !end_time) || (!start_time && end_time)) continue;
+
+      if (!start_time && !end_time) {
+        const stmt = db.prepare('INSERT INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
+        const result = await stmt.run(date, reason || null, null, null);
+        inserted.push({ id: result.lastInsertRowid || result.lastInsertId || null, date, type: 'blocked' });
+      } else {
+        const stmt = db.prepare('INSERT INTO blocked_date_segments (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
+        const result = await stmt.run(date, reason || null, start_time, end_time);
+        inserted.push({ id: result.lastInsertRowid || result.lastInsertId || null, date, type: 'segment' });
+      }
+    }
+
+    res.status(201).json({ inserted });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1215,8 +1268,8 @@ app.get('/api/availability', async (req, res) => {
     const startDate = `${yearStr}-${monthStr}-01`;
     const endDate = `${yearStr}-${monthStr}-${String(lastDay.getDate()).padStart(2, '0')}`;
 
-    const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ?');
-    const blockedRows = await blockedStmt.all(startDate, endDate);
+    const blockedStmt = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time FROM blocked_date_segments WHERE date >= ? AND date <= ?');
+    const blockedRows = await blockedStmt.all(startDate, endDate, startDate, endDate);
 
     const bookingsStmt = db.prepare('SELECT booking_date, start_time, end_time, status FROM bookings WHERE booking_date >= ? AND booking_date <= ?');
     const bookingRows = await bookingsStmt.all(startDate, endDate);
@@ -1230,8 +1283,8 @@ app.get('/api/availability', async (req, res) => {
     await syncCalendarEventsAndBlockDeleted(googleEvents);
 
     // Re-fetch blocked dates after sync
-    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ?');
-    const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate);
+    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time FROM blocked_date_segments WHERE date >= ? AND date <= ?');
+    const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate, startDate, endDate);
 
     const unavailableDates = [];
     const slotsByDate = {};
@@ -1297,8 +1350,15 @@ app.delete('/api/blocked-dates/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const stmt = db.prepare('DELETE FROM blocked_dates WHERE id = ?');
-    await stmt.run(id);
+    // Try delete from primary blocked_dates
+    const deleteStmt = db.prepare('DELETE FROM blocked_dates WHERE id = ?');
+    const result = await deleteStmt.run(id);
+
+    // If no row deleted, try blocked_date_segments
+    if (!result.changes || result.changes === 0) {
+      const delSeg = db.prepare('DELETE FROM blocked_date_segments WHERE id = ?');
+      await delSeg.run(id);
+    }
 
     res.json({ success: true });
   } catch (error) {
@@ -1315,10 +1375,20 @@ app.put('/api/blocked-dates/:id', async (req, res) => {
       return res.status(400).json({ error: 'Date is required' });
     }
 
-    const stmt = db.prepare(
-      'UPDATE blocked_dates SET date = ?, start_time = ?, end_time = ?, reason = ? WHERE id = ?',
-    );
-    await stmt.run(date, start_time || null, end_time || null, reason || null, id);
+    // Try update in blocked_dates first
+    const checkStmt = db.prepare('SELECT id FROM blocked_dates WHERE id = ?');
+    const exists = await checkStmt.get(id);
+    if (exists) {
+      const stmt = db.prepare(
+        'UPDATE blocked_dates SET date = ?, start_time = ?, end_time = ?, reason = ? WHERE id = ?',
+      );
+      await stmt.run(date, start_time || null, end_time || null, reason || null, id);
+    } else {
+      const stmt = db.prepare(
+        'UPDATE blocked_date_segments SET date = ?, start_time = ?, end_time = ?, reason = ? WHERE id = ?',
+      );
+      await stmt.run(date, start_time || null, end_time || null, reason || null, id);
+    }
 
     res.json({ success: true });
   } catch (error) {
