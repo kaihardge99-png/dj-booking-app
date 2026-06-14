@@ -1462,7 +1462,6 @@ app.delete('/api/blocked-dates/:id', verifyAdminToken, async (req, res) => {
 
 // Add calendar ignore (ignore Google Calendar events for a specific date)
 // Basic admin auth middleware (uses ADMIN_PASSWORD env var)
-const path = require('path');
 
 const getAdminPassword = () => {
   const envPass = process.env.ADMIN_PASSWORD;
