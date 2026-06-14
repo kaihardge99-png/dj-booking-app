@@ -213,6 +213,13 @@ const sqliteSchema = `
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS calendar_ignores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -271,6 +278,12 @@ const postgresSchemaStatements = [
     start_time TEXT,
     end_time TEXT,
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS calendar_ignores (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL UNIQUE,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
@@ -1306,6 +1319,11 @@ app.get('/api/availability', async (req, res) => {
     const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time, reason FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time, reason FROM blocked_date_segments WHERE date >= ? AND date <= ?');
     const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate, startDate, endDate);
 
+    // Fetch any calendar ignore rules (dates where Google Calendar should be ignored)
+    const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date >= ? AND date <= ?');
+    const ignoreRows = await ignoreStmt.all(startDate, endDate);
+    const ignoreSet = new Set(ignoreRows.map((r) => r.date));
+
     const fullDayBlockedDates = [];
     const partialBlockedSegments = [];
     for (const row of blockedRowsAfterSync) {
@@ -1327,7 +1345,7 @@ app.get('/api/availability', async (req, res) => {
     for (let day = 1; day <= lastDay.getDate(); day += 1) {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
       const dayBookings = activeBookingRows.filter((row) => row.booking_date === date);
-      const dayEvents = filterEventsForDate(date, googleEvents);
+      const dayEvents = ignoreSet.has(date) ? [] : filterEventsForDate(date, googleEvents);
       const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
 
       slotsByDate[date] = availability.slots;
@@ -1403,6 +1421,32 @@ app.delete('/api/blocked-dates/:id', async (req, res) => {
   }
 });
 
+// Add calendar ignore (ignore Google Calendar events for a specific date)
+app.post('/api/calendar-ignore', async (req, res) => {
+  try {
+    const { date, reason } = req.body;
+    if (!date) return res.status(400).json({ error: 'Date is required' });
+
+    const stmt = db.prepare('INSERT INTO calendar_ignores (date, reason) VALUES (?, ?)');
+    const result = await stmt.run(date, reason || null);
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove calendar ignore for a date
+app.delete('/api/calendar-ignore/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    const del = db.prepare('DELETE FROM calendar_ignores WHERE date = ?');
+    await del.run(date);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.put('/api/blocked-dates/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1430,6 +1474,34 @@ app.put('/api/blocked-dates/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint: show computed availability inputs for a single date
+app.get('/api/debug-availability', async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ error: 'date query is required YYYY-MM-DD' });
+
+    const blockedStmt = db.prepare('SELECT date, start_time, end_time, reason FROM blocked_dates WHERE date = ? UNION ALL SELECT date, start_time, end_time, reason FROM blocked_date_segments WHERE date = ?');
+    const blockedRows = await blockedStmt.all(date, date);
+
+    const bookingsStmt = db.prepare('SELECT booking_date, start_time, end_time, status FROM bookings WHERE booking_date = ?');
+    const bookingRows = await bookingsStmt.all(date);
+
+    const dayStartIso = new Date(`${date}T00:00:00`).toISOString();
+    const dayEndIso = new Date(`${date}T23:59:59`).toISOString();
+    const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+    const dayEvents = filterEventsForDate(date, googleEvents);
+
+    const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
+    const ignoreRows = await ignoreStmt.all(date);
+
+    const availability = await listDateAvailability(date, blockedRows, bookingRows, ignoreRows.length ? [] : dayEvents);
+
+    return res.json({ date, blockedRows, bookingRows, dayEvents, ignore: ignoreRows.length > 0, availability });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 });
 
