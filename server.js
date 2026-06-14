@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { Pool } = require('pg');
 const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
@@ -33,6 +34,11 @@ if (!process.env.JWT_SECRET) {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+app.get(['/admin', '/admin/*'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.use(express.static('public'));
 
 const createSqliteDb = () => {
@@ -973,7 +979,7 @@ app.post('/api/reset-password', async (req, res) => {
 // Routes
 
 // Get all bookings
-app.get('/api/bookings', async (req, res) => {
+app.get('/api/bookings', verifyAdminToken, async (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM bookings ORDER BY booking_date DESC');
     const rows = await stmt.all();
@@ -1255,7 +1261,7 @@ app.post('/api/bookings', async (req, res) => {
 });
 
 // Update booking status
-app.put('/api/bookings/:id', async (req, res) => {
+app.put('/api/bookings/:id', verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -1288,7 +1294,7 @@ app.get('/api/blocked-dates', async (req, res) => {
 });
 
 // Bulk import blocked dates/segments
-app.post('/api/blocked-dates/bulk', async (req, res) => {
+app.post('/api/blocked-dates/bulk', verifyAdminToken, async (req, res) => {
   try {
     const items = req.body;
     if (!Array.isArray(items)) return res.status(400).json({ error: 'Expected an array of blocked date items' });
@@ -1404,7 +1410,7 @@ app.get('/api/availability', async (req, res) => {
 });
 
 // Add blocked date
-app.post('/api/blocked-dates', async (req, res) => {
+app.post('/api/blocked-dates', verifyAdminToken, async (req, res) => {
   try {
     const { date, reason, start_time, end_time } = req.body;
 
@@ -1434,7 +1440,7 @@ app.post('/api/blocked-dates', async (req, res) => {
 });
 
 // Delete blocked date
-app.delete('/api/blocked-dates/:id', async (req, res) => {
+app.delete('/api/blocked-dates/:id', verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1529,7 +1535,11 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
 });
 
-app.put('/api/blocked-dates/:id', async (req, res) => {
+app.get('/admin/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
+});
+
+app.put('/api/blocked-dates/:id', verifyAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { date, start_time, end_time, reason } = req.body;
@@ -1564,8 +1574,9 @@ app.put('/api/blocked-dates/:id', async (req, res) => {
 // Admin login
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
+  const adminPassword = getAdminPassword();
 
-  if (password === 'admin123') {
+  if (password === adminPassword) {
     const token = jwt.sign({ admin: true }, process.env.JWT_SECRET, { expiresIn: '24h' });
     res.json({ token });
   } else {
@@ -1594,7 +1605,7 @@ app.get('/api/settings', async (req, res) => {
 });
 
 // Update settings (admin only)
-app.put('/api/settings', async (req, res) => {
+app.put('/api/settings', verifyAdminToken, async (req, res) => {
   try {
     const { max_booking_days } = req.body;
 
@@ -1622,6 +1633,26 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(403).json({ error: 'Invalid or expired token' });
+  }
+};
+
+const verifyAdminToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded.admin) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     req.user = decoded;
     next();
   } catch (error) {

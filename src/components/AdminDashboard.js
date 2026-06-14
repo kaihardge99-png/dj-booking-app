@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './AdminDashboard.css';
 
-function AdminDashboard({ onBlockedDatesUpdate }) {
+function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
   const [activeTab, setActiveTab] = useState('bookings');
   const [bookings, setBookings] = useState([]);
   const [blockedDates, setBlockedDates] = useState([]);
@@ -34,11 +34,13 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     fetchSettings();
   }, []);
 
+  const authHeaders = adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
+
   const fetchCalendarAvailability = async () => {
     try {
       const today = new Date();
       const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-      const response = await fetch(`/api/availability?month=${month}`);
+      const response = await fetch(`/api/availability?month=${month}`, { headers: authHeaders });
       if (!response.ok) return;
 
       const data = await response.json();
@@ -51,7 +53,11 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
 
   const fetchBookings = async () => {
     try {
-      const response = await fetch('/api/bookings');
+      const response = await fetch('/api/bookings', { headers: authHeaders });
+      if (!response.ok) {
+        console.error('Error fetching bookings:', response.statusText);
+        return;
+      }
       const data = await response.json();
       setBookings(data);
       calculateStats(data);
@@ -62,7 +68,11 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
 
   const fetchBlockedDates = async () => {
     try {
-      const response = await fetch('/api/blocked-dates');
+      const response = await fetch('/api/blocked-dates', { headers: authHeaders });
+      if (!response.ok) {
+        console.error('Error fetching blocked dates:', response.statusText);
+        return;
+      }
       const data = await response.json();
       setBlockedDates(data);
     } catch (error) {
@@ -72,7 +82,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch('/api/settings');
+      const response = await fetch('/api/settings', { headers: authHeaders });
       if (!response.ok) return;
       const data = await response.json();
       setMaxBookingDays(data.max_booking_days || 30);
@@ -89,7 +99,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     try {
       const response = await fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ max_booking_days: maxBookingDays }),
       });
 
@@ -122,7 +132,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     try {
       const response = await fetch(`/api/bookings/${bookingId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ status: newStatus }),
       });
 
@@ -132,6 +142,15 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     } catch (error) {
       console.error('Error updating booking:', error);
     }
+  };
+
+  const handleConfirmBooking = async (bookingId) => {
+    await handleStatusChange(bookingId, 'confirmed');
+  };
+
+  const handleCancelBooking = async (bookingId) => {
+    if (!window.confirm('Cancel this booking?')) return;
+    await handleStatusChange(bookingId, 'cancelled');
   };
 
   const handleAddBlockedDate = async (e) => {
@@ -145,7 +164,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     try {
       const response = await fetch('/api/blocked-dates', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           date: newBlockedDate,
           reason: newBlockedReason,
@@ -174,6 +193,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     try {
       const response = await fetch(`/api/blocked-dates/${dateId}`, {
         method: 'DELETE',
+        headers: authHeaders,
       });
 
       if (response.ok) {
@@ -212,7 +232,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
     try {
       const response = await fetch(`/api/blocked-dates/${editingBlockedDateId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           date: editingBlockedDate,
           reason: editingBlockedReason,
@@ -242,7 +262,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
       const items = JSON.parse(importJsonText);
       const response = await fetch('/api/blocked-dates/bulk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify(items),
       });
 
@@ -356,6 +376,7 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                       <th>Package</th>
                       <th>Price</th>
                       <th>Status</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -380,6 +401,20 @@ function AdminDashboard({ onBlockedDatesUpdate }) {
                             <option value="completed">Completed</option>
                             <option value="cancelled">Cancelled</option>
                           </select>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            {booking.status !== 'confirmed' && booking.status !== 'completed' && (
+                              <button type="button" className="confirm-btn" onClick={() => handleConfirmBooking(booking.id)}>
+                                Confirm
+                              </button>
+                            )}
+                            {booking.status !== 'cancelled' && (
+                              <button type="button" className="cancel-btn" onClick={() => handleCancelBooking(booking.id)}>
+                                Cancel
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

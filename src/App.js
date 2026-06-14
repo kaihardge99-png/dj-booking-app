@@ -24,6 +24,9 @@ function App() {
     if (params.get('admin') === 'true') {
       setCurrentPage('admin');
     }
+    if (window.location.pathname === '/admin' || window.location.pathname === '/admin/') {
+      setCurrentPage('admin');
+    }
     if (params.get('reset')) {
       setResetToken(params.get('reset'));
     }
@@ -135,7 +138,7 @@ function App() {
         ) : currentPage === 'view' ? (
           <BookingsList />
         ) : currentPage === 'admin' && adminToken ? (
-          <AdminDashboard onBlockedDatesUpdate={handleBlockedDatesUpdate} />
+          <AdminDashboard onBlockedDatesUpdate={handleBlockedDatesUpdate} adminToken={adminToken} />
         ) : currentPage === 'admin' ? (
           <AdminLogin onLogin={handleAdminLogin} />
         ) : null}
