@@ -1455,6 +1455,39 @@ app.delete('/api/blocked-dates/:id', async (req, res) => {
 });
 
 // Add calendar ignore (ignore Google Calendar events for a specific date)
+// Basic admin auth middleware (uses ADMIN_PASSWORD env var)
+const path = require('path');
+
+const getAdminPassword = () => {
+  const envPass = process.env.ADMIN_PASSWORD;
+  if (envPass) return envPass;
+  if (isProd) {
+    console.warn('Warning: ADMIN_PASSWORD not set in production; using default password. Set ADMIN_PASSWORD to secure admin endpoints.');
+  }
+  return 'admin123';
+};
+
+const basicAuthMiddleware = (req, res, next) => {
+  const adminPass = getAdminPassword();
+  if (!adminPass) return res.status(500).json({ error: 'Admin password not configured' });
+
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const creds = Buffer.from(auth.split(' ')[1], 'base64').toString('utf8');
+  const [user, pass] = creds.split(':');
+  if (user !== 'admin' || pass !== adminPass) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  next();
+};
+
+// Add calendar ignore (ignore Google Calendar events for a specific date)
 app.post('/api/calendar-ignore', basicAuthMiddleware, async (req, res) => {
   try {
     const { date, reason } = req.body;
@@ -1490,39 +1523,6 @@ app.get('/api/calendar-ignores', basicAuthMiddleware, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-// Simple admin UI for managing calendar ignores (no-auth, for quick access)
-const path = require('path');
-
-// Basic admin auth middleware (uses ADMIN_PASSWORD env var)
-const getAdminPassword = () => {
-  const envPass = process.env.ADMIN_PASSWORD;
-  if (envPass) return envPass;
-  if (isProd) {
-    console.warn('Warning: ADMIN_PASSWORD not set in production; using default password. Set ADMIN_PASSWORD to secure admin endpoints.');
-  }
-  return 'admin123';
-};
-
-const basicAuthMiddleware = (req, res, next) => {
-  const adminPass = getAdminPassword();
-  if (!adminPass) return res.status(500).json({ error: 'Admin password not configured' });
-
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Basic ')) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const creds = Buffer.from(auth.split(' ')[1], 'base64').toString('utf8');
-  const [user, pass] = creds.split(':');
-  if (user !== 'admin' || pass !== adminPass) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin"');
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  next();
-};
 
 app.get('/admin', basicAuthMiddleware, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
