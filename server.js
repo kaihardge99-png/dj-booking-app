@@ -366,18 +366,26 @@ const postgresSchemaStatements = [
 ];
 
 const initializeDatabase = async () => {
-  await initializeDatabaseConnection();
+  try {
+    await initializeDatabaseConnection();
 
-  if (db.kind === 'postgres') {
-    for (const statement of postgresSchemaStatements) {
-      await db.exec(statement);
+    if (db.kind === 'postgres') {
+      for (const statement of postgresSchemaStatements) {
+        await db.exec(statement);
+      }
+    } else {
+      await db.exec(sqliteSchema);
     }
-  } else {
-    await db.exec(sqliteSchema);
-  }
 
-  await ensureBlockedDatesColumns();
-  await ensureBookingUsernameColumn();
+    await ensureBlockedDatesColumns();
+    await ensureBookingUsernameColumn();
+  } catch (error) {
+    console.error('Database initialization failed, falling back to SQLite:', error.message);
+    db = createSqliteDb();
+    await db.exec(sqliteSchema);
+    await ensureBlockedDatesColumns();
+    await ensureBookingUsernameColumn();
+  }
 };
 
 // Periodic calendar sync: poll Google Calendar and sync cache/blocks so edits appear automatically
