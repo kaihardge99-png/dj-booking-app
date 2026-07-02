@@ -180,7 +180,7 @@ const initializeDatabaseConnection = async () => {
 };
 
 const ensureBlockedDatesColumns = async () => {
-  if (usePostgres) {
+  if (db.kind === 'postgres') {
     await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS start_time TEXT;');
     await db.exec('ALTER TABLE blocked_dates ADD COLUMN IF NOT EXISTS end_time TEXT;');
   } else {
@@ -197,7 +197,7 @@ const ensureBlockedDatesColumns = async () => {
 };
 
 const ensureBookingUsernameColumn = async () => {
-  if (usePostgres) {
+  if (db.kind === 'postgres') {
     await db.exec('ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_username TEXT;');
   } else {
     const columns = await db.prepare("PRAGMA table_info(bookings);").all();
