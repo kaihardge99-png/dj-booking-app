@@ -92,6 +92,7 @@ const createSqliteDb = () => {
   sqlite.pragma('journal_mode = WAL');
 
   return {
+    kind: 'sqlite',
     exec: async (sql) => sqlite.exec(sql),
     prepare: (sql) => {
       const stmt = sqlite.prepare(sql);
@@ -151,6 +152,7 @@ const createPostgresDb = () => {
   };
 
   return {
+    kind: 'postgres',
     exec: async (sql) => {
       await pool.query(sql);
     },
@@ -158,7 +160,24 @@ const createPostgresDb = () => {
   };
 };
 
-const db = usePostgres ? createPostgresDb() : createSqliteDb();
+let db = createSqliteDb();
+
+const initializeDatabaseConnection = async () => {
+  if (usePostgres) {
+    try {
+      const postgresDb = createPostgresDb();
+      await postgresDb.exec('SELECT 1');
+      db = postgresDb;
+      console.log('Using PostgreSQL database');
+      return;
+    } catch (error) {
+      console.warn('PostgreSQL unavailable, falling back to SQLite:', error.message);
+    }
+  }
+
+  db = createSqliteDb();
+  console.log('Using SQLite database');
+};
 
 const ensureBlockedDatesColumns = async () => {
   if (usePostgres) {
@@ -347,7 +366,9 @@ const postgresSchemaStatements = [
 ];
 
 const initializeDatabase = async () => {
-  if (usePostgres) {
+  await initializeDatabaseConnection();
+
+  if (db.kind === 'postgres') {
     for (const statement of postgresSchemaStatements) {
       await db.exec(statement);
     }
@@ -1735,8 +1756,8 @@ initializeDatabase().then(() => {
   // start periodic calendar polling (keeps Google edits synced automatically)
   startCalendarPolling(5);
 
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }).catch((err) => {
   console.error('Database initialization failed:', err);
