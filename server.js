@@ -28,6 +28,11 @@ const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+
+console.log('[CONFIG] Environment variables available:');
+console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', process.env.GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET');
+console.log('[CONFIG] NODE_ENV:', process.env.NODE_ENV);
+console.log('[CONFIG] PORT:', PORT);
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
