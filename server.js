@@ -28,9 +28,10 @@ const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || 'https://calendar.app.google/mzksDUh3UEkJftJD8';
 
 console.log('[CONFIG] Environment variables available:');
-console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', process.env.GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET');
+console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET');
 console.log('[CONFIG] NODE_ENV:', process.env.NODE_ENV);
 console.log('[CONFIG] PORT:', PORT);
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
@@ -675,7 +676,7 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
 };
 
 const fetchGoogleAppointmentAvailability = async (month) => {
-  if (!process.env.GOOGLE_APPOINTMENT_URL) return [];
+  if (!GOOGLE_APPOINTMENT_URL) return [];
 
   console.log('[Appointment] Fetching availability for month:', month);
   console.log('[Appointment] Browser available:', !!puppeteer && !!chromium);
@@ -696,8 +697,8 @@ const fetchGoogleAppointmentAvailability = async (month) => {
 
     try {
       const page = await browser.newPage();
-      console.log('[Appointment] Navigating to:', process.env.GOOGLE_APPOINTMENT_URL);
-      await page.goto(process.env.GOOGLE_APPOINTMENT_URL, {
+      console.log('[Appointment] Navigating to:', GOOGLE_APPOINTMENT_URL);
+      await page.goto(GOOGLE_APPOINTMENT_URL, {
         waitUntil: 'networkidle2',
         timeout: 60000,
       });
@@ -1502,7 +1503,7 @@ app.get('/api/availability', async (req, res) => {
     const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
     const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-    const appointmentUnavailableDates = process.env.GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(month) : [];
+    const appointmentUnavailableDates = GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(month) : [];
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
