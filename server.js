@@ -16,8 +16,10 @@ let chromium = null;
 try {
   puppeteer = require('puppeteer-core');
   chromium = require('@sparticuz/chromium');
+  console.log('✓ Puppeteer and Chromium successfully loaded');
 } catch (error) {
   console.warn('Puppeteer/Chromium not available:', error.message);
+  console.warn('This is expected if running in a browser environment');
 }
 
 const app = express();
@@ -670,12 +672,16 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
 const fetchGoogleAppointmentAvailability = async (month) => {
   if (!process.env.GOOGLE_APPOINTMENT_URL) return [];
 
+  console.log('[Appointment] Fetching availability for month:', month);
+  console.log('[Appointment] Browser available:', !!puppeteer && !!chromium);
+
   try {
     if (!puppeteer || !chromium) {
-      console.warn('Browser not available for appointment page scraping, skipping');
+      console.warn('[Appointment] Browser not available for appointment page scraping, skipping');
       return [];
     }
 
+    console.log('[Appointment] Launching browser...');
     const browser = await puppeteer.launch({
       args: await chromium.args(),
       defaultViewport: chromium.defaultViewport,
@@ -685,10 +691,12 @@ const fetchGoogleAppointmentAvailability = async (month) => {
 
     try {
       const page = await browser.newPage();
+      console.log('[Appointment] Navigating to:', process.env.GOOGLE_APPOINTMENT_URL);
       await page.goto(process.env.GOOGLE_APPOINTMENT_URL, {
         waitUntil: 'networkidle2',
         timeout: 60000,
       });
+      console.log('[Appointment] Waiting for page to render...');
       await page.waitForTimeout(3000);
 
       const labels = await page.evaluate(() => {
@@ -698,13 +706,21 @@ const fetchGoogleAppointmentAvailability = async (month) => {
           .filter(Boolean);
       });
 
+      console.log('[Appointment] Extracted labels count:', labels.length);
+      if (labels.length > 0) {
+        console.log('[Appointment] First 5 labels:', labels.slice(0, 5));
+      }
+
       await page.close();
-      return parseUnavailableDatesFromLabels(labels, month);
+      const unavailable = parseUnavailableDatesFromLabels(labels, month);
+      console.log('[Appointment] Parsed unavailable dates:', unavailable.length, unavailable.slice(0, 5));
+      return unavailable;
     } finally {
       await browser.close();
     }
   } catch (error) {
-    console.error('Google appointment page fetch error:', error.message);
+    console.error('[Appointment] Error:', error.message);
+    console.error('[Appointment] Stack:', error.stack);
     return [];
   }
 };
