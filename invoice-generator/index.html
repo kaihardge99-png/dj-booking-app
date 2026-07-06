@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Australian Invoice Generator</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local desktop app</p>
+          <h1>Invoice Generator</h1>
+          <p class="subtitle">Create polished Australian invoices and save them as PDF from your computer.</p>
+        </div>
+        <div class="header-actions">
+          <button id="printBtn" class="primary">Generate PDF</button>
+          <button id="resetBtn" class="secondary">New invoice</button>
+        </div>
+        <div id="statusMessage" class="status-message" aria-live="polite"></div>
+      </header>
+
+      <main class="content-grid">
+        <section class="panel form-panel">
+          <h2>Invoice details</h2>
+          <form id="invoiceForm">
+            <fieldset>
+              <legend>Your business</legend>
+              <div class="grid two-col">
+                <label>
+                  Business name
+                  <input type="text" name="businessName" />
+                </label>
+                <label>
+                  Email
+                  <input type="email" name="businessEmail" />
+                </label>
+                <label>
+                  Phone
+                  <input type="text" name="businessPhone" />
+                </label>
+                <label>
+                  ABN
+                  <input type="text" name="businessTax" />
+                </label>
+              </div>
+              <div class="grid two-col">
+                <label>
+                  Bank name
+                  <input type="text" name="bankName" />
+                </label>
+                <label>
+                  Account name
+                  <input type="text" name="accountName" />
+                </label>
+                <label>
+                  BSB
+                  <input type="text" name="bsbNumber" />
+                </label>
+                <label>
+                  Account number
+                  <input type="text" name="accountNumber" />
+                </label>
+                <label>
+                  Payment terms
+                  <input type="text" name="paymentTerms" placeholder="e.g. Due within 7 days" />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Client</legend>
+              <div class="grid two-col">
+                <label>
+                  Client name
+                  <input type="text" name="clientName" />
+                </label>
+                <label>
+                  Client email
+                  <input type="email" name="clientEmail" />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Invoice information</legend>
+              <div class="grid two-col">
+                <label>
+                  Invoice number
+                  <input type="text" name="invoiceNumber" />
+                </label>
+                <label>
+                  Invoice date
+                  <input type="date" name="invoiceDate" />
+                </label>
+                <label>
+                  Due date
+                  <input type="date" name="dueDate" />
+                </label>
+                <label>
+                  Currency
+                  <input type="text" name="currency" placeholder="AUD" />
+                </label>
+                <label>
+                  Reference / PO number
+                  <input type="text" name="referenceNumber" />
+                </label>
+                <label>
+                  Payment method
+                  <input type="text" name="paymentMethod" placeholder="Bank transfer" />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Items</legend>
+              <div class="preset-controls">
+                <label>
+                  Quick add package
+                  <select id="presetItemSelect">
+                    <option value="">Choose a package</option>
+                    <option value="DJ Practice booking Package 1 - 1 hr">DJ Practice booking Package 1 - 1 hr</option>
+                    <option value="DJ Practice booking Package 2 - 1 hr">DJ Practice booking Package 2 - 1 hr</option>
+                  </select>
+                </label>
+                <button type="button" id="addPresetItemBtn" class="secondary">Add selected package</button>
+              </div>
+              <div id="itemsList" class="items-list"></div>
+              <button type="button" id="addItemBtn" class="secondary">+ Add custom item</button>
+            </fieldset>
+
+            <fieldset>
+              <legend>Notes</legend>
+              <label>
+                Notes
+                <textarea name="notes" rows="3"></textarea>
+              </label>
+              <label>
+                Terms
+                <textarea name="terms" rows="3"></textarea>
+              </label>
+            </fieldset>
+          </form>
+        </section>
+
+        <section class="panel preview-panel">
+          <div id="invoicePreview" class="invoice-preview"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

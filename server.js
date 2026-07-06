@@ -8,7 +8,17 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
 const { google } = require('googleapis');
+const { parseUnavailableDatesFromLabels } = require('./googleAppointmentAvailability');
 require('dotenv').config();
+
+let chromium = null;
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    ({ chromium } = require('playwright'));
+  } catch (error) {
+    console.warn('Playwright is not available:', error.message);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -657,6 +667,62 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
   }
 };
 
+const fetchGoogleAppointmentAvailability = async (month) => {
+  if (!process.env.GOOGLE_APPOINTMENT_URL) return [];
+
+  try {
+    if (!chromium) {
+      const response = await axios.get(process.env.GOOGLE_APPOINTMENT_URL, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        timeout: 20000,
+      });
+
+      const html = response.data || '';
+      const labels = [];
+      const buttonRegex = /<button[^>]*aria-label="([^"]*)"[^>]*>/gi;
+      let match = buttonRegex.exec(html);
+      while (match) {
+        labels.push(match[1]);
+        match = buttonRegex.exec(html);
+      }
+
+      const titleRegex = /<title>([^<]*)<\/title>/i;
+      const titleMatch = html.match(titleRegex);
+      if (!labels.length && titleMatch) {
+        labels.push(titleMatch[1]);
+      }
+
+      return parseUnavailableDatesFromLabels(labels, month);
+    }
+
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+
+    try {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+      await page.goto(process.env.GOOGLE_APPOINTMENT_URL, { waitUntil: 'networkidle', timeout: 60000 });
+      await page.waitForTimeout(5000);
+
+      const labels = await page.locator('button').evaluateAll((nodes) => nodes
+        .map((node) => (node.getAttribute('aria-label') || '').trim())
+        .filter(Boolean));
+
+      await page.close();
+      return parseUnavailableDatesFromLabels(labels, month);
+    } finally {
+      await browser.close();
+    }
+  } catch (error) {
+    console.error('Google appointment page fetch error:', error.message);
+    return [];
+  }
+};
+
 const filterEventsForDate = (date, events) => {
   const dayStart = new Date(`${date}T00:00:00`);
   const dayEnd = new Date(`${date}T23:59:59`);
@@ -864,6 +930,7 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
   const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
   const calendarEvents = filterEventsForDate(booking_date, googleEvents);
+  const appointmentUnavailableDates = process.env.GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(booking_date.slice(0, 7)) : [];
 
   // Check if this date is configured to ignore Google Calendar events
   const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
@@ -871,6 +938,9 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const finalCalendarEvents = ignoreRows.length ? [] : calendarEvents;
 
   const availability = await listDateAvailability(booking_date, blockedRows, existingBookings, finalCalendarEvents);
+  if (appointmentUnavailableDates.includes(booking_date)) {
+    return false;
+  }
   return availability.slots.includes(start_time);
 };
 
@@ -1425,6 +1495,7 @@ app.get('/api/availability', async (req, res) => {
     const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
     const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
+    const appointmentUnavailableDates = process.env.GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(month) : [];
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
@@ -1455,6 +1526,7 @@ app.get('/api/availability', async (req, res) => {
 
     const unavailableDates = [];
     const slotsByDate = {};
+    const appointmentUnavailableSet = new Set(appointmentUnavailableDates);
 
     for (let day = 1; day <= lastDay.getDate(); day += 1) {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
@@ -1462,8 +1534,12 @@ app.get('/api/availability', async (req, res) => {
       const dayEvents = ignoreSet.has(date) ? [] : filterEventsForDate(date, googleEvents);
       const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
 
-      slotsByDate[date] = availability.slots;
-      if (availability.isUnavailable) {
+      const isAppointmentUnavailable = appointmentUnavailableSet.has(date);
+      const finalSlots = isAppointmentUnavailable ? [] : availability.slots;
+      const finalIsUnavailable = isAppointmentUnavailable || availability.isUnavailable;
+
+      slotsByDate[date] = finalSlots;
+      if (finalIsUnavailable) {
         unavailableDates.push(date);
       }
     }
@@ -1475,8 +1551,8 @@ app.get('/api/availability', async (req, res) => {
       fullDayBlockedDates,
       partialBlockedSegments,
       source: {
-        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL),
-        authMode: GOOGLE_SERVICE_ACCOUNT_JSON ? 'adc_service_account' : GOOGLE_API_KEY ? 'api_key' : GOOGLE_CALENDAR_ICS_URL ? 'ics_url' : 'none',
+        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL || process.env.GOOGLE_APPOINTMENT_URL),
+        authMode: GOOGLE_SERVICE_ACCOUNT_JSON ? 'adc_service_account' : GOOGLE_API_KEY ? 'api_key' : GOOGLE_CALENDAR_ICS_URL ? 'ics_url' : process.env.GOOGLE_APPOINTMENT_URL ? 'appointment_page' : 'none',
       },
     });
   } catch (error) {

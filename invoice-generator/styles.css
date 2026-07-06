@@ -1,0 +1,295 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f4f6fb;
+  color: #152033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(135deg, #f8faff 0%, #eef2ff 100%);
+  color: #152033;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.8rem 1.1rem;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+.primary {
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18);
+}
+
+.secondary {
+  background: #e8edf7;
+  color: #24344f;
+}
+
+.app-shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.2rem;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: #5b6b86;
+  margin: 0 0 0.2rem;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  color: #55647d;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.status-message {
+  width: 100%;
+  margin-top: 0.4rem;
+  color: #2563eb;
+  font-size: 0.95rem;
+  min-height: 1.2rem;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(320px, 0.9fr);
+  gap: 1rem;
+}
+
+.panel {
+  background: white;
+  border-radius: 24px;
+  padding: 1rem;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+fieldset {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 0.95rem;
+  margin-bottom: 0.9rem;
+}
+
+legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.92rem;
+  color: #40506a;
+  margin-bottom: 0.6rem;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #d9e2f0;
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: #fbfcfe;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.preset-controls {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.preset-controls select {
+  width: 100%;
+  border: 1px solid #d9e2f0;
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: #fbfcfe;
+}
+
+.item-card {
+  border: 1px solid #e6ebf3;
+  border-radius: 14px;
+  padding: 0.75rem;
+  background: #f9fbff;
+}
+
+.item-card .item-row {
+  display: grid;
+  grid-template-columns: 2fr 0.7fr 0.8fr 0.55fr;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.item-card .remove-btn {
+  margin-top: 0.6rem;
+  width: fit-content;
+  padding: 0.45rem 0.7rem;
+}
+
+.invoice-preview {
+  border: 1px solid #e5ebf5;
+  border-radius: 22px;
+  padding: 1.4rem;
+  background: #fff;
+  color: #132033;
+}
+
+.invoice-preview .top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.invoice-preview h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.3rem;
+}
+
+.invoice-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8rem 0;
+}
+
+.invoice-preview th,
+.invoice-preview td {
+  padding: 0.6rem 0.4rem;
+  border-bottom: 1px solid #e8edf3;
+  text-align: left;
+}
+
+.invoice-preview th:last-child,
+.invoice-preview td:last-child {
+  text-align: right;
+}
+
+.summary {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.summary .box {
+  min-width: 260px;
+  border: 1px solid #e8edf3;
+  border-radius: 14px;
+  padding: 0.8rem 1rem;
+  background: #fafcff;
+}
+
+.muted {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 980px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .two-col,
+  .item-card .item-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+
+  .app-shell {
+    max-width: none;
+    padding: 0;
+  }
+
+  .topbar,
+  .form-panel,
+  .header-actions {
+    display: none !important;
+  }
+
+  .content-grid {
+    display: block;
+  }
+
+  .preview-panel {
+    box-shadow: none;
+    border: 0;
+    padding: 0;
+  }
+
+  .invoice-preview {
+    border: 0;
+    padding: 0;
+  }
+}
