@@ -26,7 +26,7 @@ services:
       - key: GOOGLE_CALENDAR_ICS_URL
         sync: false
       - key: GOOGLE_APPOINTMENT_URL
-        sync: false
+        value: https://calendar.app.google/mzksDUh3UEkJfdJD8
       - key: ADMIN_PASSWORD
         value: admin123
 
