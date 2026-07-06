@@ -11,13 +11,13 @@ const { google } = require('googleapis');
 const { parseUnavailableDatesFromLabels } = require('./googleAppointmentAvailability');
 require('dotenv').config();
 
+let puppeteer = null;
 let chromium = null;
-if (process.env.NODE_ENV !== 'production') {
-  try {
-    ({ chromium } = require('playwright'));
-  } catch (error) {
-    console.warn('Playwright is not available:', error.message);
-  }
+try {
+  puppeteer = require('puppeteer-core');
+  chromium = require('@sparticuz/chromium');
+} catch (error) {
+  console.warn('Puppeteer/Chromium not available:', error.message);
 }
 
 const app = express();
@@ -671,46 +671,32 @@ const fetchGoogleAppointmentAvailability = async (month) => {
   if (!process.env.GOOGLE_APPOINTMENT_URL) return [];
 
   try {
-    if (!chromium) {
-      const response = await axios.get(process.env.GOOGLE_APPOINTMENT_URL, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        timeout: 20000,
-      });
-
-      const html = response.data || '';
-      const labels = [];
-      const buttonRegex = /<button[^>]*aria-label="([^"]*)"[^>]*>/gi;
-      let match = buttonRegex.exec(html);
-      while (match) {
-        labels.push(match[1]);
-        match = buttonRegex.exec(html);
-      }
-
-      const titleRegex = /<title>([^<]*)<\/title>/i;
-      const titleMatch = html.match(titleRegex);
-      if (!labels.length && titleMatch) {
-        labels.push(titleMatch[1]);
-      }
-
-      return parseUnavailableDatesFromLabels(labels, month);
+    if (!puppeteer || !chromium) {
+      console.warn('Browser not available for appointment page scraping, skipping');
+      return [];
     }
 
-    const browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    const browser = await puppeteer.launch({
+      args: await chromium.args(),
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
-      await page.goto(process.env.GOOGLE_APPOINTMENT_URL, { waitUntil: 'networkidle', timeout: 60000 });
-      await page.waitForTimeout(5000);
+      const page = await browser.newPage();
+      await page.goto(process.env.GOOGLE_APPOINTMENT_URL, {
+        waitUntil: 'networkidle2',
+        timeout: 60000,
+      });
+      await page.waitForTimeout(3000);
 
-      const labels = await page.locator('button').evaluateAll((nodes) => nodes
-        .map((node) => (node.getAttribute('aria-label') || '').trim())
-        .filter(Boolean));
+      const labels = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons
+          .map((btn) => btn.getAttribute('aria-label') || '')
+          .filter(Boolean);
+      });
 
       await page.close();
       return parseUnavailableDatesFromLabels(labels, month);
