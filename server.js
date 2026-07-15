@@ -700,16 +700,24 @@ const fetchGoogleAppointmentAvailability = async (month) => {
 
     try {
       const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36');
       console.log('[Appointment] Navigating to:', GOOGLE_APPOINTMENT_URL);
       await page.goto(GOOGLE_APPOINTMENT_URL, {
         waitUntil: 'networkidle2',
         timeout: 60000,
       });
       console.log('[Appointment] Waiting for page to render...');
-      await new Promise((res) => setTimeout(res, 3000));
+      try {
+        await page.waitForSelector('button[aria-label]', { timeout: 10000 });
+      } catch (waitErr) {
+        console.warn('[Appointment] waitForSelector timed out:', waitErr.message);
+        const content = await page.content();
+        console.log('[Appointment] Page content length:', content.length);
+        console.log('[Appointment] Page content snippet:', content.slice(0, 2000));
+      }
 
       const labels = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
+        const buttons = Array.from(document.querySelectorAll('button[aria-label]'));
         return buttons
           .map((btn) => btn.getAttribute('aria-label') || '')
           .filter(Boolean);
