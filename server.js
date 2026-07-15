@@ -688,6 +688,9 @@ const fetchGoogleAppointmentAvailability = async (month) => {
     }
 
     console.log('[Appointment] Launching browser...');
+    console.log('[Appointment] chromium keys:', Object.keys(chromium || {}));
+    console.log('[Appointment] chromium.executablePath type:', typeof (chromium && chromium.executablePath));
+    console.log('[Appointment] chromium.args type:', typeof (chromium && chromium.args));
     const browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
