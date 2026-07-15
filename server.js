@@ -15,7 +15,7 @@ let puppeteer = null;
 let chromium = null;
 try {
   puppeteer = require('puppeteer-core');
-  chromium = require('@sparticuz/chromium');
+    chromium = require('@sparticuz/chromium').default || require('@sparticuz/chromium');
   console.log('✓ Puppeteer and Chromium successfully loaded');
 } catch (error) {
   console.warn('Puppeteer/Chromium not available:', error.message);
