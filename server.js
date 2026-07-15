@@ -675,10 +675,11 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
   }
 };
 
-const fetchGoogleAppointmentAvailability = async (month) => {
-  if (!GOOGLE_APPOINTMENT_URL) return [];
+const fetchGoogleAppointmentAvailability = async (month, appointmentUrl = GOOGLE_APPOINTMENT_URL) => {
+  if (!appointmentUrl) return [];
 
   console.log('[Appointment] Fetching availability for month:', month);
+  console.log('[Appointment] Using appointment URL:', appointmentUrl);
   console.log('[Appointment] Browser available:', !!puppeteer && !!chromium);
 
   try {
@@ -701,8 +702,8 @@ const fetchGoogleAppointmentAvailability = async (month) => {
     try {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36');
-      console.log('[Appointment] Navigating to:', GOOGLE_APPOINTMENT_URL);
-      await page.goto(GOOGLE_APPOINTMENT_URL, {
+      console.log('[Appointment] Navigating to:', appointmentUrl);
+      await page.goto(appointmentUrl, {
         waitUntil: 'networkidle2',
         timeout: 60000,
       });
@@ -1519,7 +1520,8 @@ app.get('/api/availability', async (req, res) => {
     const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
     const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-    const appointmentUnavailableDates = GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(month) : [];
+    const requestAppointmentUrl = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : GOOGLE_APPOINTMENT_URL;
+    const appointmentUnavailableDates = requestAppointmentUrl ? await fetchGoogleAppointmentAvailability(month, requestAppointmentUrl) : [];
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
