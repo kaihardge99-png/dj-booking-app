@@ -723,6 +723,11 @@ const fetchGoogleAppointmentAvailability = async (month) => {
           .filter(Boolean);
       });
 
+      if (!labels || labels.length === 0) {
+        const contentAfter = await page.content();
+        console.log('[Appointment] Page content length after evaluate:', contentAfter.length);
+        console.log('[Appointment] Page snippet after evaluate:', contentAfter.slice(0, 3000));
+      }
       console.log('[Appointment] Extracted labels count:', labels.length);
       if (labels.length > 0) {
         console.log('[Appointment] First 5 labels:', labels.slice(0, 5));
