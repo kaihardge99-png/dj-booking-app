@@ -706,7 +706,7 @@ const fetchGoogleAppointmentAvailability = async (month) => {
         timeout: 60000,
       });
       console.log('[Appointment] Waiting for page to render...');
-      await page.waitForTimeout(3000);
+      await new Promise((res) => setTimeout(res, 3000));
 
       const labels = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button'));
