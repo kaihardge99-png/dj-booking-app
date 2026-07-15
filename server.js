@@ -28,6 +28,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+let OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
 const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || 'https://calendar.app.google/mzksDUh3UEkJftJD8';
 
 console.log('[CONFIG] Environment variables available:');
@@ -675,7 +676,8 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
   }
 };
 
-const fetchGoogleAppointmentAvailability = async (month, appointmentUrl = GOOGLE_APPOINTMENT_URL) => {
+const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
+  appointmentUrl = appointmentUrl || OVERRIDE_GOOGLE_APPOINTMENT_URL || GOOGLE_APPOINTMENT_URL;
   if (!appointmentUrl) return [];
 
   console.log('[Appointment] Fetching availability for month:', month);
@@ -1520,8 +1522,9 @@ app.get('/api/availability', async (req, res) => {
     const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
     const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-    const requestAppointmentUrl = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : GOOGLE_APPOINTMENT_URL;
-    const appointmentUnavailableDates = requestAppointmentUrl ? await fetchGoogleAppointmentAvailability(month, requestAppointmentUrl) : [];
+    // Support per-request override of the Google appointment URL for testing
+    OVERRIDE_GOOGLE_APPOINTMENT_URL = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : null;
+    const appointmentUnavailableDates = await fetchGoogleAppointmentAvailability(month);
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
@@ -1570,6 +1573,9 @@ app.get('/api/availability', async (req, res) => {
       }
     }
 
+    // clear override after processing
+    OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
+
     return res.json({
       month,
       unavailableDates,
@@ -1582,6 +1588,7 @@ app.get('/api/availability', async (req, res) => {
       },
     });
   } catch (error) {
+    OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
     return res.status(500).json({ error: error.message });
   }
 });
