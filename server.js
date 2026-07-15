@@ -689,7 +689,7 @@ const fetchGoogleAppointmentAvailability = async (month) => {
 
     console.log('[Appointment] Launching browser...');
     const browser = await puppeteer.launch({
-      args: await chromium.args(),
+      args: chromium.args,
       defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
