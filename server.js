@@ -720,10 +720,29 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       }
 
       const labels = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button[aria-label]'));
-        return buttons
-          .map((btn) => btn.getAttribute('aria-label') || '')
-          .filter(Boolean);
+        const out = [];
+        // collect aria-labels from any element
+        const els = Array.from(document.querySelectorAll('[aria-label]'));
+        els.forEach((el) => {
+          const a = el.getAttribute('aria-label');
+          if (a) out.push(a);
+        });
+
+        // also scan visible text nodes for 'no available' phrases
+        try {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+          let node;
+          while ((node = walker.nextNode())) {
+            const t = (node.textContent || '').trim();
+            if (t && /no available times|no available/i.test(t)) {
+              out.push(t);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        return Array.from(new Set(out)).filter(Boolean);
       });
 
       if (!labels || labels.length === 0) {
