@@ -871,7 +871,69 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       }
 
       if (!appointmentResponse) {
-        console.warn('[Appointment] No ListAvailableSlots response found, falling back to label parse');
+        console.warn('[Appointment] No ListAvailableSlots response found, attempting WIZ_global_data fallback');
+
+        // First try to extract a candidate payload from window.WIZ_global_data
+        const wizCandidate = await page.evaluate(() => {
+          try {
+            const root = window.WIZ_global_data;
+            if (!root) return null;
+
+            const visited = new WeakSet();
+
+            const looksLikeSlotNode = (node) => {
+              if (!Array.isArray(node)) return false;
+              // find at least one child that matches [something, number]
+              for (const item of node) {
+                if (Array.isArray(item) && item.length === 2 && typeof item[1] === 'number') return true;
+              }
+              return false;
+            };
+
+            const findNode = (node) => {
+              if (!node || typeof node !== 'object') return null;
+              if (visited.has(node)) return null;
+              visited.add(node);
+
+              if (looksLikeSlotNode(node)) return node;
+
+              if (Array.isArray(node)) {
+                for (const child of node) {
+                  const res = findNode(child);
+                  if (res) return res;
+                }
+              } else {
+                for (const k of Object.keys(node)) {
+                  const res = findNode(node[k]);
+                  if (res) return res;
+                }
+              }
+
+              return null;
+            };
+
+            return findNode(root) || null;
+          } catch (err) {
+            return null;
+          }
+        });
+
+        if (wizCandidate) {
+          console.log('[Appointment] Found WIZ_global_data candidate payload, parsing');
+          // Use the same parsing helpers used for ListAvailableSlots payloads
+          try {
+            const appointmentData = buildAppointmentAvailabilityFromSlots(wizCandidate, month);
+            console.log('[Appointment] Parsed unavailable appointment dates (WIZ):', appointmentData.unavailableDates.length);
+            await page.close();
+            return appointmentData;
+          } catch (err) {
+            console.warn('[Appointment] WIZ_global_data parsing failed:', err && err.message);
+            // fall through to label parse below
+          }
+        }
+
+        // Last-resort: label parse as before
+        console.warn('[Appointment] Falling back to label parse (no WIZ candidate)');
         const labels = await page.evaluate(() => {
           const out = [];
           const nodes = Array.from(document.querySelectorAll('[aria-label]'));
