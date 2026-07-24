@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const Database = require('better-sqlite3');
@@ -8,7 +9,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
 const { google } = require('googleapis');
-const { parseUnavailableDatesFromLabels } = require('./googleAppointmentAvailability');
+const { parseUnavailableDatesFromLabels, getMonthDateRange } = require('./googleAppointmentAvailability');
 require('dotenv').config();
 
 let puppeteer = null;
@@ -29,16 +30,19 @@ const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 let OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
-const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || 'https://calendar.app.google/mzksDUh3UEkJftJD8';
+const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || '';
+const CHROME_EXECUTABLE_PATH = process.env.CHROME_EXECUTABLE_PATH || '';
+const APPOINTMENT_AVAILABILITY_CACHE = new Map();
 
 console.log('[CONFIG] Environment variables available:');
 console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET');
+console.log('[CONFIG] GOOGLE_CALENDAR_ICS_URL:', process.env.GOOGLE_CALENDAR_ICS_URL ? '✓ SET' : '✗ NOT SET');
 console.log('[CONFIG] NODE_ENV:', process.env.NODE_ENV);
 console.log('[CONFIG] PORT:', PORT);
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
-const PRIMARY_AVAILABILITY_SOURCE = process.env.GOOGLE_CALENDAR_ICS_URL ? 'ics' : (process.env.GOOGLE_APPOINTMENT_URL ? 'appointment' : 'none');
+const PRIMARY_AVAILABILITY_SOURCE = GOOGLE_APPOINTMENT_URL ? 'appointment' : (GOOGLE_CALENDAR_ICS_URL ? 'ics' : 'none');
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -677,6 +681,92 @@ const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
   }
 };
 
+const normalizeAppointmentDate = (timestampSeconds) => {
+  const date = new Date(timestampSeconds * 1000);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
+const normalizeAppointmentTime = (timestampSeconds) => {
+  const date = new Date(timestampSeconds * 1000);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: APP_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = parts.find((p) => p.type === 'hour')?.value || '00';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  return `${hour}:${minute}`;
+};
+
+const parseAppointmentSlotsPayload = (payload) => {
+  const slots = [];
+  const visit = (node) => {
+    if (!node) return;
+    if (!Array.isArray(node)) return;
+
+    if (
+      node.length === 2 &&
+      Array.isArray(node[0]) &&
+      node[0].length > 0 &&
+      typeof node[0][0] === 'string' &&
+      typeof node[1] === 'number'
+    ) {
+      const timestamp = Number(node[0][0]);
+      if (!Number.isNaN(timestamp)) {
+        slots.push({ timestamp, duration: node[1] });
+      }
+    }
+
+    for (const item of node) {
+      visit(item);
+    }
+  };
+
+  visit(payload);
+  return slots;
+};
+
+const buildAppointmentAvailabilityFromSlots = (payload, month) => {
+  const slots = parseAppointmentSlotsPayload(payload);
+  const map = {};
+
+  slots.forEach(({ timestamp }) => {
+    const date = normalizeAppointmentDate(timestamp);
+    const time = normalizeAppointmentTime(timestamp);
+    if (!map[date]) map[date] = new Set();
+    map[date].add(time);
+  });
+
+  const formatted = {};
+  for (const [date, times] of Object.entries(map)) {
+    formatted[date] = Array.from(times).sort();
+  }
+
+  const unavailableDates = [];
+  if (month && typeof month === 'string') {
+    const [yearStr, monthStr] = String(month).split('-');
+    const year = Number(yearStr);
+    const monthIndex = Number(monthStr) - 1;
+    if (!Number.isNaN(year) && !Number.isNaN(monthIndex)) {
+      const { firstDay, lastDay } = getMonthDateRange(year, monthIndex);
+      for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().slice(0, 10);
+        if (!formatted[dateStr]) {
+          unavailableDates.push(dateStr);
+        }
+      }
+    }
+  }
+
+  return { slotsByDate: formatted, unavailableDates };
+};
+
 const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
   appointmentUrl = appointmentUrl || OVERRIDE_GOOGLE_APPOINTMENT_URL || GOOGLE_APPOINTMENT_URL;
   if (!appointmentUrl) return [];
@@ -691,75 +781,88 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       return [];
     }
 
+    const browserArgs = (chromium && chromium.args) ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'];
+    let executablePath = CHROME_EXECUTABLE_PATH;
+    if (!executablePath && process.platform === 'darwin') {
+      const defaultChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      if (fs.existsSync(defaultChromePath)) {
+        executablePath = defaultChromePath;
+      }
+    }
+    if (!executablePath && chromium && chromium.executablePath) {
+      executablePath = await chromium.executablePath();
+    }
+    if (!executablePath) {
+      console.warn('[Appointment] No browser executable path available, skipping appointment availability fetch');
+      return [];
+    }
+
     console.log('[Appointment] Launching browser...');
-    console.log('[Appointment] chromium keys:', Object.keys(chromium || {}));
-    console.log('[Appointment] chromium.executablePath type:', typeof (chromium && chromium.executablePath));
-    console.log('[Appointment] chromium.args type:', typeof (chromium && chromium.args));
     const browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      args: browserArgs,
+      executablePath,
+      headless: true,
+      defaultViewport: chromium.defaultViewport || null,
     });
 
     try {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36');
       console.log('[Appointment] Navigating to:', appointmentUrl);
+
+      let appointmentResponse = null;
+      const onResponse = (response) => {
+        const url = response.url();
+        if (url.includes('AppointmentBookingService/ListAvailableSlots') && response.status() === 200) {
+          appointmentResponse = response;
+        }
+      };
+      page.on('response', onResponse);
+
       await page.goto(appointmentUrl, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
-      console.log('[Appointment] Waiting for page to render...');
+
       try {
-        await page.waitForSelector('button[aria-label]', { timeout: 10000 });
+        await page.waitForResponse((res) => res.url().includes('AppointmentBookingService/ListAvailableSlots') && res.status() === 200, { timeout: 20000 });
       } catch (waitErr) {
-        console.warn('[Appointment] waitForSelector timed out:', waitErr.message);
-        const content = await page.content();
-        console.log('[Appointment] Page content length:', content.length);
-        console.log('[Appointment] Page content snippet:', content.slice(0, 2000));
+        console.warn('[Appointment] Could not capture ListAvailableSlots response:', waitErr.message);
       }
 
-      const labels = await page.evaluate(() => {
-        const out = [];
-        // collect aria-labels from any element
-        const els = Array.from(document.querySelectorAll('[aria-label]'));
-        els.forEach((el) => {
-          const a = el.getAttribute('aria-label');
-          if (a) out.push(a);
+      if (!appointmentResponse) {
+        console.warn('[Appointment] No ListAvailableSlots response found, falling back to label parse');
+        const labels = await page.evaluate(() => {
+          const out = [];
+          const els = Array.from(document.querySelectorAll('[aria-label]'));
+          els.forEach((el) => {
+            const a = el.getAttribute('aria-label');
+            if (a) out.push(a);
+          });
+          return Array.from(new Set(out)).filter(Boolean);
         });
-
-        // also scan visible text nodes for 'no available' phrases
-        try {
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-          let node;
-          while ((node = walker.nextNode())) {
-            const t = (node.textContent || '').trim();
-            if (t && /no available times|no available/i.test(t)) {
-              out.push(t);
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        return Array.from(new Set(out)).filter(Boolean);
-      });
-
-      if (!labels || labels.length === 0) {
-        const contentAfter = await page.content();
-        console.log('[Appointment] Page content length after evaluate:', contentAfter.length);
-        console.log('[Appointment] Page snippet after evaluate:', contentAfter.slice(0, 3000));
-      }
-      console.log('[Appointment] Extracted labels count:', labels.length);
-      if (labels.length > 0) {
-        console.log('[Appointment] First 5 labels:', labels.slice(0, 5));
+        await page.close();
+        return {
+          slotsByDate: {},
+          unavailableDates: parseUnavailableDatesFromLabels(labels, month),
+        };
       }
 
+      const responseText = await appointmentResponse.text();
       await page.close();
-      const unavailable = parseUnavailableDatesFromLabels(labels, month);
-      console.log('[Appointment] Parsed unavailable dates:', unavailable.length, unavailable.slice(0, 5));
-      return unavailable;
+      let payload;
+      try {
+        payload = JSON.parse(responseText);
+      } catch (parseErr) {
+        console.error('[Appointment] Failed to parse ListAvailableSlots response:', parseErr.message);
+        console.error('[Appointment] Response text sample:', responseText.slice(0, 1000));
+        return { slotsByDate: {}, unavailableDates: [] };
+      }
+
+      const appointmentData = buildAppointmentAvailabilityFromSlots(payload, month);
+      console.log('[Appointment] Parsed available appointment dates:', Object.keys(appointmentData.slotsByDate).length);
+      console.log('[Appointment] Parsed unavailable appointment dates:', appointmentData.unavailableDates.length);
+      return appointmentData;
     } finally {
       await browser.close();
     }
@@ -768,6 +871,26 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
     console.error('[Appointment] Stack:', error.stack);
     return [];
   }
+};
+
+const getCachedAppointmentAvailability = async (month, appointmentUrl) => {
+  if (!GOOGLE_APPOINTMENT_URL && !appointmentUrl) {
+    return { slotsByDate: {}, unavailableDates: [] };
+  }
+
+  const key = `${month}|${appointmentUrl || GOOGLE_APPOINTMENT_URL}`;
+  const cached = APPOINTMENT_AVAILABILITY_CACHE.get(key);
+  if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) {
+    return cached.data;
+  }
+
+  const data = await fetchGoogleAppointmentAvailability(month, appointmentUrl);
+  const normalizedData = {
+    slotsByDate: data?.slotsByDate || {},
+    unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
+  };
+  APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
+  return normalizedData;
 };
 
 const filterEventsForDate = (date, events) => {
@@ -977,7 +1100,14 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
   const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
   const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-  const appointmentUnavailableDates = [];
+
+  const appointmentAvailability = GOOGLE_APPOINTMENT_URL
+    ? await getCachedAppointmentAvailability(booking_date.slice(0, 7))
+    : { slotsByDate: {}, unavailableDates: [] };
+
+  if (appointmentAvailability.unavailableDates.includes(booking_date)) {
+    return false;
+  }
 
   // Check if this date is configured to ignore Google Calendar events
   const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
@@ -985,6 +1115,10 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const finalCalendarEvents = ignoreRows.length ? [] : calendarEvents;
 
   const availability = await listDateAvailability(booking_date, blockedRows, existingBookings, finalCalendarEvents);
+  const appointmentSlots = appointmentAvailability.slotsByDate[booking_date] || null;
+  if (appointmentSlots) {
+    return appointmentSlots.includes(start_time);
+  }
   return availability.slots.includes(start_time);
 };
 
@@ -1541,10 +1675,7 @@ app.get('/api/availability', async (req, res) => {
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
     // Support per-request override of the Google appointment URL for testing
     OVERRIDE_GOOGLE_APPOINTMENT_URL = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : null;
-    let appointmentUnavailableDates = [];
-    if (!googleEvents.length && PRIMARY_AVAILABILITY_SOURCE === 'appointment') {
-      appointmentUnavailableDates = await fetchGoogleAppointmentAvailability(month);
-    }
+    const appointmentAvailability = await getCachedAppointmentAvailability(month, OVERRIDE_GOOGLE_APPOINTMENT_URL);
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
@@ -1575,7 +1706,8 @@ app.get('/api/availability', async (req, res) => {
 
     const unavailableDates = [];
     const slotsByDate = {};
-    const appointmentUnavailableSet = new Set(appointmentUnavailableDates);
+    const appointmentUnavailableSet = new Set(appointmentAvailability.unavailableDates || []);
+    const appointmentSlotsByDate = appointmentAvailability.slotsByDate || {};
 
     for (let day = 1; day <= lastDay.getDate(); day += 1) {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
@@ -1583,9 +1715,14 @@ app.get('/api/availability', async (req, res) => {
       const dayEvents = ignoreSet.has(date) ? [] : filterEventsForDate(date, googleEvents);
       const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
 
-      const isAppointmentUnavailable = appointmentUnavailableSet.has(date);
-      const finalSlots = isAppointmentUnavailable ? [] : availability.slots;
-      const finalIsUnavailable = isAppointmentUnavailable || availability.isUnavailable;
+      let finalSlots = availability.slots;
+      if (appointmentSlotsByDate[date]) {
+        finalSlots = availability.slots.filter((slot) => appointmentSlotsByDate[date].includes(slot));
+      }
+      if (appointmentUnavailableSet.has(date)) {
+        finalSlots = [];
+      }
+      const finalIsUnavailable = appointmentUnavailableSet.has(date) || finalSlots.length === 0;
 
       slotsByDate[date] = finalSlots;
       if (finalIsUnavailable) {
@@ -1602,9 +1739,22 @@ app.get('/api/availability', async (req, res) => {
       slotsByDate,
       fullDayBlockedDates,
       partialBlockedSegments,
+      appointmentUnavailableDates: appointmentAvailability.unavailableDates || [],
+      appointmentSlotsByDate: appointmentAvailability.slotsByDate || {},
       source: {
-        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL || process.env.GOOGLE_APPOINTMENT_URL),
-        authMode: GOOGLE_SERVICE_ACCOUNT_JSON ? 'adc_service_account' : GOOGLE_API_KEY ? 'api_key' : GOOGLE_CALENDAR_ICS_URL ? 'ics_url' : process.env.GOOGLE_APPOINTMENT_URL ? 'appointment_page' : 'none',
+        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL || GOOGLE_APPOINTMENT_URL),
+        authMode: GOOGLE_SERVICE_ACCOUNT_JSON
+          ? 'adc_service_account'
+          : GOOGLE_API_KEY
+          ? 'api_key'
+          : GOOGLE_CALENDAR_ICS_URL && GOOGLE_APPOINTMENT_URL
+          ? 'ics_url_and_appointment_page'
+          : GOOGLE_CALENDAR_ICS_URL
+          ? 'ics_url'
+          : GOOGLE_APPOINTMENT_URL
+          ? 'appointment_page'
+          : 'none',
+        appointmentUrl: Boolean(GOOGLE_APPOINTMENT_URL),
       },
     });
   } catch (error) {
@@ -1886,6 +2036,26 @@ app.put('/api/user/update/:username', verifyToken, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Diagnostic endpoint for deployments: confirm which availability sources are configured.
+app.get('/api/availability-source', (req, res) => {
+  res.json({
+    appointmentUrlConfigured: Boolean(GOOGLE_APPOINTMENT_URL),
+    icsUrlConfigured: Boolean(GOOGLE_CALENDAR_ICS_URL),
+    primaryAvailabilitySource: PRIMARY_AVAILABILITY_SOURCE,
+    authMode: GOOGLE_SERVICE_ACCOUNT_JSON
+      ? 'adc_service_account'
+      : GOOGLE_API_KEY
+      ? 'api_key'
+      : GOOGLE_CALENDAR_ICS_URL && GOOGLE_APPOINTMENT_URL
+      ? 'ics_url_and_appointment_page'
+      : GOOGLE_CALENDAR_ICS_URL
+      ? 'ics_url'
+      : GOOGLE_APPOINTMENT_URL
+      ? 'appointment_page'
+      : 'none',
+  });
 });
 
 // Start server

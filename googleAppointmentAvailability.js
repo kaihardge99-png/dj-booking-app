@@ -68,4 +68,5 @@ const parseUnavailableDatesFromLabels = (labels = [], month) => {
 
 module.exports = {
   parseUnavailableDatesFromLabels,
+  getMonthDateRange,
 };
