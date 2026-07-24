@@ -1006,21 +1006,84 @@ const getCachedAppointmentAvailability = async (month, appointmentUrl) => {
   if (!GOOGLE_APPOINTMENT_URL && !appointmentUrl) {
     return { slotsByDate: {}, unavailableDates: [] };
   }
-
   const key = `${month}|${appointmentUrl || GOOGLE_APPOINTMENT_URL}`;
   const cached = APPOINTMENT_AVAILABILITY_CACHE.get(key);
+
+  // If we have a fresh cache entry, return it immediately
   if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) {
     return cached.data;
   }
 
-  const data = await fetchGoogleAppointmentAvailability(month, appointmentUrl);
-  const normalizedData = {
-    slotsByDate: data?.slotsByDate || {},
-    unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
-  };
-  APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
-  return normalizedData;
+  // If we have a stale cache entry, return it immediately and refresh in background
+  if (cached) {
+    // background refresh (don't await)
+    fetchGoogleAppointmentAvailability(month, appointmentUrl)
+      .then((data) => {
+        const normalizedData = {
+          slotsByDate: data?.slotsByDate || {},
+          unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
+        };
+        APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
+        console.log('[Appointment] Background refreshed cache for', key);
+      })
+      .catch((err) => console.warn('[Appointment] Background refresh failed:', err && err.message));
+
+    return cached.data;
+  }
+
+  // No cache: kick off a background fetch and return an immediate empty/default result
+  fetchGoogleAppointmentAvailability(month, appointmentUrl)
+    .then((data) => {
+      const normalizedData = {
+        slotsByDate: data?.slotsByDate || {},
+        unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
+      };
+      APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
+      console.log('[Appointment] Primed cache for', key);
+    })
+    .catch((err) => console.warn('[Appointment] Priming cache failed:', err && err.message));
+
+  return { slotsByDate: {}, unavailableDates: [] };
 };
+
+// Periodic background scraper to proactively fetch and cache appointment availability
+const startAppointmentBackgroundScraper = (intervalMinutes = 10, monthsAhead = 2) => {
+  const run = async () => {
+    try {
+      const now = new Date();
+      for (let i = 0; i <= monthsAhead; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const key = `${monthKey}|${GOOGLE_APPOINTMENT_URL}`;
+        console.log('[Appointment] Background fetch for', monthKey);
+        try {
+          const data = await fetchGoogleAppointmentAvailability(monthKey, GOOGLE_APPOINTMENT_URL);
+          const normalizedData = {
+            slotsByDate: data?.slotsByDate || {},
+            unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
+          };
+          APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
+          console.log('[Appointment] Background cached', monthKey, '→', normalizedData.unavailableDates.length, 'unavailable');
+        } catch (err) {
+          console.warn('[Appointment] Background fetch failed for', monthKey, err && err.message);
+        }
+      }
+    } catch (err) {
+      console.error('[Appointment] Background scraper error:', err && err.message);
+    }
+  };
+
+  // Run immediately, then on interval
+  run();
+  setInterval(run, intervalMinutes * 60 * 1000);
+};
+
+// Start background scraper on module load
+try {
+  startAppointmentBackgroundScraper(10, 2);
+} catch (err) {
+  console.warn('[Appointment] Failed to start background scraper:', err && err.message);
+}
 
 const filterEventsForDate = (date, events) => {
   const dayStart = new Date(`${date}T00:00:00`);
