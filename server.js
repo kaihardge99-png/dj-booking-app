@@ -717,36 +717,64 @@ const isAppointmentRpcUrl = (url) => {
 const parseAppointmentSlotsPayload = (payload) => {
   const slots = [];
 
-  const extractTimestamp = (node) => {
-    if (typeof node === 'string') return node;
-    if (!Array.isArray(node) || node.length === 0) return null;
+  const asNumber = (v) => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string' && /^\d{9,}$/.test(v)) return Number(v);
+    return null;
+  };
 
-    for (const item of node) {
-      const candidate = extractTimestamp(item);
-      if (candidate) return candidate;
-    }
+  const normalizeTimestamp = (ts) => {
+    if (ts === null || ts === undefined) return null;
+    let n = asNumber(ts);
+    if (n === null) return null;
+    // If timestamp looks like milliseconds, convert to seconds
+    if (n > 1e12) n = Math.floor(n / 1000);
+    return n;
+  };
 
+  const tryExtractFromArrayPair = (arr) => {
+    if (!Array.isArray(arr) || arr.length < 2) return null;
+    const candTs = normalizeTimestamp(arr[0]) || normalizeTimestamp(arr[1]);
+    const candDur = typeof arr[1] === 'number' ? arr[1] : (typeof arr[2] === 'number' ? arr[2] : null);
+    if (candTs && candDur) return { timestamp: candTs, duration: candDur };
     return null;
   };
 
   const visit = (node) => {
-    if (!node || !Array.isArray(node)) return;
+    if (node === null || node === undefined) return;
 
-    if (node.length === 2 && typeof node[1] === 'number') {
-      const timestampString = extractTimestamp(node[0]);
-      const timestamp = Number(timestampString);
-      if (!Number.isNaN(timestamp)) {
-        slots.push({ timestamp, duration: node[1] });
+    // Direct array pair like [ts, duration]
+    if (Array.isArray(node)) {
+      const maybe = tryExtractFromArrayPair(node);
+      if (maybe) slots.push(maybe);
+
+      for (const item of node) {
+        visit(item);
       }
+      return;
     }
 
-    for (const item of node) {
-      visit(item);
+    // If object, iterate values
+    if (typeof node === 'object') {
+      for (const k of Object.keys(node)) {
+        visit(node[k]);
+      }
     }
   };
 
   visit(payload);
-  return slots;
+  // Deduplicate by timestamp+duration
+  const seen = new Set();
+  const out = [];
+  for (const s of slots) {
+    const key = `${s.timestamp}:${s.duration}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(s);
+    }
+  }
+
+  return out;
 };
 
 const buildAppointmentAvailabilityFromSlots = (payload, month) => {
@@ -815,12 +843,29 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
     }
 
     console.log('[Appointment] Launching browser...');
-    const browser = await puppeteer.launch({
-      args: browserArgs,
-      executablePath,
-      headless: true,
-      defaultViewport: chromium.defaultViewport || null,
-    });
+    let browser = null;
+    const maxLaunchAttempts = 3;
+    for (let attempt = 1; attempt <= maxLaunchAttempts; attempt++) {
+      try {
+        browser = await puppeteer.launch({
+          args: browserArgs,
+          executablePath,
+          headless: true,
+          defaultViewport: chromium.defaultViewport || null,
+        });
+        break;
+      } catch (launchErr) {
+        console.warn(`[Appointment] Browser launch attempt ${attempt} failed:`, launchErr && launchErr.message);
+        // If ETXTBSY or spawn-related, wait and retry
+        if (attempt < maxLaunchAttempts) {
+          const backoff = 1000 * Math.pow(2, attempt);
+          console.log(`[Appointment] Retrying browser launch in ${backoff}ms`);
+          await sleep(backoff);
+          continue;
+        }
+        throw launchErr;
+      }
+    }
 
     try {
       const page = await browser.newPage();
