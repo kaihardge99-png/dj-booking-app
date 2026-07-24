@@ -707,6 +707,11 @@ const normalizeAppointmentTime = (timestampSeconds) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isAppointmentRpcUrl = (url) => {
+  if (!url || typeof url !== 'string') return false;
+  return /AppointmentBookingService|ListAvailableSlots|calendar-pa\.clients6\.google\.com/.test(url);
+};
+
 const parseAppointmentSlotsPayload = (payload) => {
   const slots = [];
 
@@ -823,30 +828,36 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       let appointmentResponse = null;
       const onResponse = (response) => {
         const url = response.url();
-        if (url.includes('AppointmentBookingService/ListAvailableSlots') && response.status() === 200) {
+        if (isAppointmentRpcUrl(url) && response.status() === 200) {
           appointmentResponse = response;
+          console.log('[Appointment] Captured RPC response URL:', url);
         }
       };
       page.on('response', onResponse);
+      page.on('requestfailed', (request) => {
+        if (isAppointmentRpcUrl(request.url())) {
+          console.warn('[Appointment] Appointment request failed:', request.url(), request.failure()?.errorText || 'unknown');
+        }
+      });
 
       await page.goto(appointmentUrl, {
-        waitUntil: 'networkidle2',
+        waitUntil: 'load',
         timeout: 60000,
       });
 
-      await sleep(2000);
+      await sleep(5000);
 
       if (!appointmentResponse) {
         try {
           const response = await page.waitForResponse(
-            (res) => res.url().includes('AppointmentBookingService/ListAvailableSlots') && res.status() === 200,
-            { timeout: 20000 }
+            (res) => isAppointmentRpcUrl(res.url()) && res.status() === 200,
+            { timeout: 60000 }
           );
           if (response) {
             appointmentResponse = response;
           }
         } catch (waitErr) {
-          console.warn('[Appointment] Could not capture ListAvailableSlots response:', waitErr.message);
+          console.warn('[Appointment] Could not capture appointment RPC response:', waitErr.message);
         }
       }
 
