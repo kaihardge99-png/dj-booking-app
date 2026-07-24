@@ -1009,6 +1009,25 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
           } catch (e) {
             console.warn('[Appointment] Failed to extract WIZ_global_data summary:', e && e.message);
           }
+
+          // Try parsing the entire WIZ_global_data root as a last-ditch attempt
+          try {
+            const rootResult = await page.evaluate(() => window.WIZ_global_data);
+            if (rootResult) {
+              try {
+                const parsed = buildAppointmentAvailabilityFromSlots(rootResult, month);
+                if (parsed && (Object.keys(parsed.slotsByDate || {}).length > 0 || (parsed.unavailableDates || []).length > 0)) {
+                  console.log('[Appointment] Parsed appointment data by scanning full WIZ_global_data root');
+                  await page.close();
+                  return parsed;
+                }
+              } catch (err) {
+                console.warn('[Appointment] Parsing full WIZ_global_data failed:', err && err.message);
+              }
+            }
+          } catch (e) {
+            console.warn('[Appointment] Failed to read WIZ_global_data root for parsing:', e && e.message);
+          }
         }
         // Last-resort: label parse as before
         console.warn('[Appointment] Falling back to label parse (no WIZ candidate)');
