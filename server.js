@@ -2002,6 +2002,7 @@ app.get('/api/availability', async (req, res) => {
     const slotsByDate = {};
     const appointmentUnavailableSet = new Set(appointmentAvailability.unavailableDates || []);
     const appointmentSlotsByDate = appointmentAvailability.slotsByDate || {};
+    const hasAppointmentSlots = Object.keys(appointmentSlotsByDate).some((d) => Array.isArray(appointmentSlotsByDate[d]) && appointmentSlotsByDate[d].length > 0);
 
     for (let day = 1; day <= lastDay.getDate(); day += 1) {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
@@ -2010,13 +2011,16 @@ app.get('/api/availability', async (req, res) => {
       const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
 
       let finalSlots = availability.slots;
-      if (appointmentSlotsByDate[date]) {
+      if (hasAppointmentSlots && appointmentSlotsByDate[date]) {
         finalSlots = availability.slots.filter((slot) => appointmentSlotsByDate[date].includes(slot));
       }
-      if (appointmentUnavailableSet.has(date)) {
+
+      // Only apply appointment-derived full-day blocking when the appointment page provided explicit slot data.
+      const appointmentMarkedUnavailable = hasAppointmentSlots && appointmentUnavailableSet.has(date);
+      if (appointmentMarkedUnavailable) {
         finalSlots = [];
       }
-      const finalIsUnavailable = appointmentUnavailableSet.has(date) || finalSlots.length === 0;
+      const finalIsUnavailable = appointmentMarkedUnavailable || finalSlots.length === 0;
 
       slotsByDate[date] = finalSlots;
       if (finalIsUnavailable) {
