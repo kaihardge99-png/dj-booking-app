@@ -99,7 +99,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
 
   const isDateBlocked = (day) => {
     const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return blockedDates.includes(dateStr) || apiFullDayBlockedDates.includes(dateStr) || apiUnavailableDates.includes(dateStr) || isBeyondMaxDate(day);
+    const blockedSet = new Set([...(blockedDates || []), ...(apiFullDayBlockedDates || []), ...(apiUnavailableDates || [])]);
+    return blockedSet.has(dateStr) || isBeyondMaxDate(day);
   };
 
   const isBeyondMaxDate = (day) => {
@@ -164,6 +165,11 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
               ? `Google Calendar availability is active (${googleCalendarStatus.authMode}).`
               : 'Google Calendar not linked. Set GOOGLE_CALENDAR_ICS_URL or GOOGLE_CALENDAR_ID + GOOGLE_API_KEY in your environment.'}
           </p>
+          {apiUnavailableDates.length > 0 && (
+            <p className="calendar-connected" style={{ marginTop: '4px', fontSize: '0.9rem' }}>
+              Auto-blocked dates from Google booking availability: {apiUnavailableDates.slice(0, 5).join(', ')}{apiUnavailableDates.length > 5 ? '...' : ''}
+            </p>
+          )}
         </div>
 
         {/* Calendar */}
