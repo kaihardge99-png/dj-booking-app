@@ -30,12 +30,13 @@ const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 let OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
-const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || '';
+const FALLBACK_GOOGLE_APPOINTMENT_URL = 'https://calendar.app.google/rGqJQqGAtDwHR5kL8';
+const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || FALLBACK_GOOGLE_APPOINTMENT_URL;
 const CHROME_EXECUTABLE_PATH = process.env.CHROME_EXECUTABLE_PATH || '';
 const APPOINTMENT_AVAILABILITY_CACHE = new Map();
 
 console.log('[CONFIG] Environment variables available:');
-console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET');
+console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', process.env.GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET', `(using ${GOOGLE_APPOINTMENT_URL === FALLBACK_GOOGLE_APPOINTMENT_URL ? 'fallback' : 'env'})`);
 console.log('[CONFIG] GOOGLE_CALENDAR_ICS_URL:', process.env.GOOGLE_CALENDAR_ICS_URL ? '✓ SET' : '✗ NOT SET');
 console.log('[CONFIG] NODE_ENV:', process.env.NODE_ENV);
 console.log('[CONFIG] PORT:', PORT);
@@ -2041,7 +2042,10 @@ app.put('/api/user/update/:username', verifyToken, async (req, res) => {
 // Diagnostic endpoint for deployments: confirm which availability sources are configured.
 app.get('/api/availability-source', (req, res) => {
   res.json({
-    appointmentUrlConfigured: Boolean(GOOGLE_APPOINTMENT_URL),
+    appointmentUrlConfigured: Boolean(process.env.GOOGLE_APPOINTMENT_URL),
+    appointmentUrlEffective: Boolean(GOOGLE_APPOINTMENT_URL),
+    appointmentUrlSource: process.env.GOOGLE_APPOINTMENT_URL ? 'env' : 'fallback',
+    appointmentUrl: GOOGLE_APPOINTMENT_URL,
     icsUrlConfigured: Boolean(GOOGLE_CALENDAR_ICS_URL),
     primaryAvailabilitySource: PRIMARY_AVAILABILITY_SOURCE,
     authMode: GOOGLE_SERVICE_ACCOUNT_JSON
