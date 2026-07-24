@@ -822,6 +822,8 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
 
     try {
       const page = await browser.newPage();
+      page.setDefaultNavigationTimeout(120000);
+      page.setDefaultTimeout(120000);
       await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36');
       console.log('[Appointment] Navigating to:', appointmentUrl);
 
@@ -841,11 +843,16 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       });
 
       await page.goto(appointmentUrl, {
-        waitUntil: 'load',
-        timeout: 60000,
+        waitUntil: 'networkidle2',
+        timeout: 120000,
       });
 
-      await sleep(5000);
+      await page.waitForFunction(
+        () => document.readyState === 'complete' || document.querySelector('button[aria-label]'),
+        { timeout: 30000 }
+      ).catch(() => null);
+
+      await sleep(3000);
 
       if (!appointmentResponse) {
         try {
@@ -865,13 +872,26 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
         console.warn('[Appointment] No ListAvailableSlots response found, falling back to label parse');
         const labels = await page.evaluate(() => {
           const out = [];
-          const els = Array.from(document.querySelectorAll('[aria-label]'));
-          els.forEach((el) => {
-            const a = el.getAttribute('aria-label');
-            if (a) out.push(a);
+          const nodes = Array.from(document.querySelectorAll('[aria-label]'));
+          nodes.forEach((el) => {
+            const value = el.getAttribute('aria-label');
+            if (value) out.push(value.trim());
+          });
+          const buttons = Array.from(document.querySelectorAll('button'));
+          buttons.forEach((button) => {
+            const aria = button.getAttribute('aria-label');
+            if (aria) out.push(aria.trim());
+          });
+          const texts = Array.from(document.querySelectorAll('button,div,span'));
+          texts.forEach((el) => {
+            const text = el.textContent?.trim();
+            if (text && /no available times|no availability|no available slots|fully booked/i.test(text)) {
+              out.push(text);
+            }
           });
           return Array.from(new Set(out)).filter(Boolean);
         });
+        console.log('[Appointment] Fallback labels sample:', labels.slice(0, 20));
         console.log('[Appointment] Label fallback count:', labels.length);
         await page.close();
         return {
