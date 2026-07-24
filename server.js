@@ -881,11 +881,20 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
 
             const visited = new WeakSet();
 
+            const isTimestampLike = (v) => {
+              if (typeof v === 'number') return v > 1e9; // seconds since epoch
+              if (typeof v === 'string') return /^\d{9,}$/.test(v);
+              return false;
+            };
+
             const looksLikeSlotNode = (node) => {
               if (!Array.isArray(node)) return false;
-              // find at least one child that matches [something, number]
+              // if any child is an array with a timestamp-like first element or contains timestamp-like numbers
               for (const item of node) {
-                if (Array.isArray(item) && item.length === 2 && typeof item[1] === 'number') return true;
+                if (Array.isArray(item) && item.length >= 1) {
+                  if (isTimestampLike(item[0]) || isTimestampLike(item[1])) return true;
+                }
+                if (isTimestampLike(item)) return true;
               }
               return false;
             };
