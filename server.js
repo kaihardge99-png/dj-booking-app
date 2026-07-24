@@ -30,7 +30,9 @@ const usePostgres = Boolean(process.env.DATABASE_URL);
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 let OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
-const FALLBACK_GOOGLE_APPOINTMENT_URL = 'https://calendar.app.google/rGqJQqGAtDwHR5kL8';
+// Use the canonical Google Calendar appointments schedule URL as the fallback
+// This is more stable than short dynamic links which can return 'Dynamic Link Not Found'
+const FALLBACK_GOOGLE_APPOINTMENT_URL = 'https://calendar.google.com/calendar/appointments/schedules/AcZssZ1dBFFce1RD4OkFzmuYGWnmjmyWoWjiAIn0mrPu2v8nMIdfLgMUV22Lpug3UBEzWthPCyxhrKbl';
 const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || FALLBACK_GOOGLE_APPOINTMENT_URL;
 const CHROME_EXECUTABLE_PATH = process.env.CHROME_EXECUTABLE_PATH || '';
 const APPOINTMENT_AVAILABILITY_CACHE = new Map();
