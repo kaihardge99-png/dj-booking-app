@@ -977,7 +977,7 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
   const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
   const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-  const appointmentUnavailableDates = (PRIMARY_AVAILABILITY_SOURCE === 'appointment' && process.env.GOOGLE_APPOINTMENT_URL) ? await fetchGoogleAppointmentAvailability(booking_date.slice(0, 7)) : [];
+  const appointmentUnavailableDates = [];
 
   // Check if this date is configured to ignore Google Calendar events
   const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
@@ -985,9 +985,6 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const finalCalendarEvents = ignoreRows.length ? [] : calendarEvents;
 
   const availability = await listDateAvailability(booking_date, blockedRows, existingBookings, finalCalendarEvents);
-  if (appointmentUnavailableDates.includes(booking_date)) {
-    return false;
-  }
   return availability.slots.includes(start_time);
 };
 
