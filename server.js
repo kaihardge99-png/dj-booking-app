@@ -876,10 +876,14 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
 
       let appointmentResponse = null;
       const onResponse = (response) => {
-        const url = response.url();
-        if (isAppointmentRpcUrl(url) && response.status() === 200) {
-          appointmentResponse = response;
-          console.log('[Appointment] Captured RPC response URL:', url);
+        try {
+          const url = response.url();
+          if (isAppointmentRpcUrl(url)) {
+            appointmentResponse = response;
+            console.log('[Appointment] Captured RPC response URL:', url, 'status=', response.status());
+          }
+        } catch (e) {
+          /* ignore errors from response.url/status */
         }
       };
       page.on('response', onResponse);
@@ -904,11 +908,12 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       if (!appointmentResponse) {
         try {
           const response = await page.waitForResponse(
-            (res) => isAppointmentRpcUrl(res.url()) && res.status() === 200,
+            (res) => isAppointmentRpcUrl(res.url()),
             { timeout: 60000 }
           );
           if (response) {
             appointmentResponse = response;
+            console.log('[Appointment] waitForResponse captured RPC URL:', response.url(), 'status=', response.status());
           }
         } catch (waitErr) {
           console.warn('[Appointment] Could not capture appointment RPC response:', waitErr.message);
