@@ -707,18 +707,25 @@ const normalizeAppointmentTime = (timestampSeconds) => {
 
 const parseAppointmentSlotsPayload = (payload) => {
   const slots = [];
-  const visit = (node) => {
-    if (!node) return;
-    if (!Array.isArray(node)) return;
 
-    if (
-      node.length === 2 &&
-      Array.isArray(node[0]) &&
-      node[0].length > 0 &&
-      typeof node[0][0] === 'string' &&
-      typeof node[1] === 'number'
-    ) {
-      const timestamp = Number(node[0][0]);
+  const extractTimestamp = (node) => {
+    if (typeof node === 'string') return node;
+    if (!Array.isArray(node) || node.length === 0) return null;
+
+    for (const item of node) {
+      const candidate = extractTimestamp(item);
+      if (candidate) return candidate;
+    }
+
+    return null;
+  };
+
+  const visit = (node) => {
+    if (!node || !Array.isArray(node)) return;
+
+    if (node.length === 2 && typeof node[1] === 'number') {
+      const timestampString = extractTimestamp(node[0]);
+      const timestamp = Number(timestampString);
       if (!Number.isNaN(timestamp)) {
         slots.push({ timestamp, duration: node[1] });
       }
@@ -821,14 +828,24 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
       page.on('response', onResponse);
 
       await page.goto(appointmentUrl, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle2',
         timeout: 60000,
       });
 
-      try {
-        await page.waitForResponse((res) => res.url().includes('AppointmentBookingService/ListAvailableSlots') && res.status() === 200, { timeout: 20000 });
-      } catch (waitErr) {
-        console.warn('[Appointment] Could not capture ListAvailableSlots response:', waitErr.message);
+      await page.waitForTimeout(2000);
+
+      if (!appointmentResponse) {
+        try {
+          const response = await page.waitForResponse(
+            (res) => res.url().includes('AppointmentBookingService/ListAvailableSlots') && res.status() === 200,
+            { timeout: 20000 }
+          );
+          if (response) {
+            appointmentResponse = response;
+          }
+        } catch (waitErr) {
+          console.warn('[Appointment] Could not capture ListAvailableSlots response:', waitErr.message);
+        }
       }
 
       if (!appointmentResponse) {
@@ -842,6 +859,7 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
           });
           return Array.from(new Set(out)).filter(Boolean);
         });
+        console.log('[Appointment] Label fallback count:', labels.length);
         await page.close();
         return {
           slotsByDate: {},
@@ -849,7 +867,20 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
         };
       }
 
-      const responseText = await appointmentResponse.text();
+      let responseText = '';
+      try {
+        responseText = await appointmentResponse.text();
+      } catch (textErr) {
+        try {
+          const buffer = await appointmentResponse.buffer();
+          responseText = buffer.toString('utf8');
+        } catch (bufferErr) {
+          console.error('[Appointment] Failed to read ListAvailableSlots response:', bufferErr.message);
+          await page.close();
+          return { slotsByDate: {}, unavailableDates: [] };
+        }
+      }
+
       await page.close();
       let payload;
       try {
