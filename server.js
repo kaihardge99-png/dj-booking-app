@@ -940,7 +940,31 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
             // fall through to label parse below
           }
         }
-
+        else {
+          // Diagnostic: capture a small summary of WIZ_global_data when present but no candidate found
+          try {
+            const wizSummary = await page.evaluate(() => {
+              try {
+                const root = window.WIZ_global_data;
+                if (!root) return null;
+                const keys = Object.keys(root || {}).slice(0, 20);
+                const sample = {};
+                for (const k of keys) {
+                  const v = root[k];
+                  if (Array.isArray(v)) sample[k] = { type: 'array', len: v.length };
+                  else if (v && typeof v === 'object') sample[k] = { type: 'object', keys: Object.keys(v).slice(0, 10).length };
+                  else sample[k] = { type: typeof v };
+                }
+                return { keys: keys.length, sample };
+              } catch (e) {
+                return { error: e && e.message };
+              }
+            });
+            console.log('[Appointment] WIZ_global_data present but no candidate found:', JSON.stringify(wizSummary));
+          } catch (e) {
+            console.warn('[Appointment] Failed to extract WIZ_global_data summary:', e && e.message);
+          }
+        }
         // Last-resort: label parse as before
         console.warn('[Appointment] Falling back to label parse (no WIZ candidate)');
         const labels = await page.evaluate(() => {
