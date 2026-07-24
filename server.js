@@ -705,6 +705,8 @@ const normalizeAppointmentTime = (timestampSeconds) => {
   return `${hour}:${minute}`;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const parseAppointmentSlotsPayload = (payload) => {
   const slots = [];
 
@@ -832,7 +834,7 @@ const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
         timeout: 60000,
       });
 
-      await page.waitForTimeout(2000);
+      await sleep(2000);
 
       if (!appointmentResponse) {
         try {
