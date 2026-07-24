@@ -38,6 +38,7 @@ console.log('[CONFIG] PORT:', PORT);
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
 const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
+const PRIMARY_AVAILABILITY_SOURCE = process.env.GOOGLE_CALENDAR_ICS_URL ? 'ics' : (process.env.GOOGLE_APPOINTMENT_URL ? 'appointment' : 'none');
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -976,7 +977,7 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
   const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
   const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-  const appointmentUnavailableDates = process.env.GOOGLE_APPOINTMENT_URL ? await fetchGoogleAppointmentAvailability(booking_date.slice(0, 7)) : [];
+  const appointmentUnavailableDates = (PRIMARY_AVAILABILITY_SOURCE === 'appointment' && process.env.GOOGLE_APPOINTMENT_URL) ? await fetchGoogleAppointmentAvailability(booking_date.slice(0, 7)) : [];
 
   // Check if this date is configured to ignore Google Calendar events
   const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
@@ -1543,7 +1544,10 @@ app.get('/api/availability', async (req, res) => {
     const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
     // Support per-request override of the Google appointment URL for testing
     OVERRIDE_GOOGLE_APPOINTMENT_URL = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : null;
-    const appointmentUnavailableDates = await fetchGoogleAppointmentAvailability(month);
+    let appointmentUnavailableDates = [];
+    if (!googleEvents.length && PRIMARY_AVAILABILITY_SOURCE === 'appointment') {
+      appointmentUnavailableDates = await fetchGoogleAppointmentAvailability(month);
+    }
 
     // Sync calendar events and auto-block deleted availability slots
     await syncCalendarEventsAndBlockDeleted(googleEvents);
