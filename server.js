@@ -8,7 +8,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -1493,8 +1493,9 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
       headless: true,
     };
-    browser = await puppeteer.launch(launchOptions);
-    const page = await browser.newPage();
+    browser = await chromium.launch(launchOptions);
+    const context = await browser.newContext();
+    const page = await context.newPage();
     await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
     await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     await page.waitForTimeout(1500);
