@@ -1598,25 +1598,39 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       // As a conservative measure, do not auto-block anything without explicit labels
     }
 
-    console.log('[APPT_SYNC] debug', {
-      detectedLabels: unavailableLabels.unavailableLabels,
-      monthYearText,
-      buttonCount: unavailableLabels.buttonCount,
-    });
-
-    // Insert blocked dates into DB
+    // Insert new blocked dates into DB
     const stmt = db.prepare('INSERT OR IGNORE INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
     let added = 0;
     for (const d of blockedDates) {
       try {
-        await stmt.run(d, 'Appointment page: unavailable', null, null);
-        added++;
+        const result = await stmt.run(d, 'Appointment page: unavailable', null, null);
+        if (result && result.changes > 0) {
+          added++;
+        }
       } catch (err) {
         console.error('[APPT_SYNC] insert error', err && err.message);
       }
     }
 
-    return { success: true, addedCount: added, detected: Array.from(blockedDates) };
+    // Remove old appointment-page unavailable blocks that no longer appear on the page
+    let removed = 0;
+    try {
+      if (blockedDates.size > 0) {
+        const placeholders = Array.from(blockedDates).map(() => '?').join(', ');
+        const deleteStmt = db.prepare(`DELETE FROM blocked_dates WHERE reason = ? AND date NOT IN (${placeholders})`);
+        const deleteParams = ['Appointment page: unavailable', ...Array.from(blockedDates)];
+        const deleteResult = await deleteStmt.run(...deleteParams);
+        removed = deleteResult.changes || 0;
+      } else {
+        const deleteStmt = db.prepare('DELETE FROM blocked_dates WHERE reason = ?');
+        const deleteResult = await deleteStmt.run('Appointment page: unavailable');
+        removed = deleteResult.changes || 0;
+      }
+    } catch (err) {
+      console.error('[APPT_SYNC] cleanup error', err && err.message);
+    }
+
+    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates) };
   } catch (error) {
     console.error('[APPT_SYNC] Error scraping appointment page:', error && error.message);
     return { success: false, error: error && error.message };
