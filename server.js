@@ -1350,17 +1350,18 @@ app.put('/api/user/update/:username', verifyToken, async (req, res) => {
 // Google Calendar ICS sync
 const parseIcsEvent = (eventText) => {
   // Parse VEVENT to extract DTSTART, DTEND, SUMMARY
-  const dtStartMatch = eventText.match(/DTSTART(?:;TZID=[^:]+)?:([^\r\n]+)/);
-  const dtEndMatch = eventText.match(/DTEND(?:;TZID=[^:]+)?:([^\r\n]+)/);
+  // Accept any parameter after DTSTART/DTEND (e.g. ;VALUE=DATE or ;TZID=...)
+  const dtStartMatch = eventText.match(/DTSTART(?:;[^:]+)?:([^\r\n]+)/);
+  const dtEndMatch = eventText.match(/DTEND(?:;[^:]+)?:([^\r\n]+)/);
   const summaryMatch = eventText.match(/SUMMARY:([^\r\n]+)/);
 
-  if (!dtStartMatch || !dtEndMatch) return null;
+  if (!dtStartMatch) return null; // DTSTART is required
 
   const startStr = dtStartMatch[1].trim();
-  const endStr = dtEndMatch[1].trim();
+  const endStr = dtEndMatch ? dtEndMatch[1].trim() : null;
   const summary = summaryMatch ? summaryMatch[1].trim() : 'Blocked';
 
-  // Parse ISO 8601 format: 20260801T100000Z or 20260801T100000 or 20260801 (all-day)
+  // Parse formats like: 20260801T100000Z, 20260801T100000, or 20260801 (all-day)
   const parseDateTime = (dateTimeStr) => {
     const match = dateTimeStr.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/);
     if (!match) return null;
@@ -1368,20 +1369,23 @@ const parseIcsEvent = (eventText) => {
     const [, year, month, day, hour, minute] = match;
     const date = `${year}-${month}-${day}`;
     const time = hour && minute ? `${hour}:${minute}` : null;
-
     return { date, time };
   };
 
   const start = parseDateTime(startStr);
-  const end = parseDateTime(endStr);
+  const end = endStr ? parseDateTime(endStr) : null;
 
-  if (!start || !end) return null;
+  if (!start) return null;
+
+  // If DTEND missing, treat as single-day event
+  const endDate = end ? end.date : start.date;
+  const endTime = end ? end.time : null;
 
   return {
     startDate: start.date,
     startTime: start.time,
-    endDate: end.date,
-    endTime: end.time,
+    endDate: endDate,
+    endTime: endTime,
     summary,
   };
 };
