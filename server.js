@@ -1497,7 +1497,11 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' });
     const page = await context.newPage();
     await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(1500);
+    await Promise.race([
+      page.waitForSelector('button[aria-label]', { timeout: 30000 }),
+      page.waitForSelector('text=July 2026', { timeout: 30000 }).catch(() => null),
+    ]);
+    await page.waitForTimeout(3000);
 
     // Try to read any global data first
     const globals = await page.evaluate(() => {
@@ -1511,18 +1515,20 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     // Heuristic: find unavailable day buttons and parse their aria-labels into dates
     const unavailableLabels = await page.evaluate(() => {
       const labels = new Set();
-
       const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
       allButtons.forEach((button) => {
         const aria = button.getAttribute('aria-label');
         if (!aria) return;
         const lower = aria.toLowerCase();
-        if (/no available times|no available time|no available slots|no available times|no available slots|no availability|unavailable|not available/i.test(lower)) {
+        if (/no available times|no available time|no available slots|no availability|unavailable|not available/i.test(lower)) {
           labels.add(aria);
         }
       });
-
-      return Array.from(labels);
+      return {
+        allLabels: allButtons.slice(0, 200).map((button) => button.getAttribute('aria-label')),
+        unavailableLabels: Array.from(labels),
+        buttonCount: allButtons.length,
+      };
     });
 
     const monthYearText = await page.evaluate(() => {
@@ -1580,8 +1586,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     };
 
     const blockedDates = new Set();
-    if (Array.isArray(unavailableLabels) && unavailableLabels.length) {
-      for (const lab of unavailableLabels) {
+    if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
+      for (const lab of unavailableLabels.unavailableLabels) {
         const iso = parseLabelToDate(lab);
         if (iso) blockedDates.add(iso);
       }
@@ -1591,6 +1597,12 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     if (blockedDates.size === 0 && /no times available|no availability/i.test(globals.text || '')) {
       // As a conservative measure, do not auto-block anything without explicit labels
     }
+
+    console.log('[APPT_SYNC] debug', {
+      detectedLabels: unavailableLabels.unavailableLabels,
+      monthYearText,
+      buttonCount: unavailableLabels.buttonCount,
+    });
 
     // Insert blocked dates into DB
     const stmt = db.prepare('INSERT OR IGNORE INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
