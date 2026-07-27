@@ -1503,11 +1503,19 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     ]);
     await page.waitForTimeout(10000);
     await page.waitForFunction(
+      () => document.querySelectorAll('button[aria-label]').length >= 60,
+      { timeout: 30000 }
+    ).catch(() => null);
+
+    await page.waitForFunction(
       () => {
         const labels = Array.from(document.querySelectorAll('button[aria-label]')).map((button) => button.getAttribute('aria-label') || '');
-        return labels.some((aria) => /29,\s*Wednesday,\s*no available times/i.test(aria)) || labels.some((aria) => /August\s+2,\s*Sunday,\s*no available times/i.test(aria)) || labels.some((aria) => /August\s+4,\s*Tuesday,\s*no available times/i.test(aria));
+        const stableLabels = labels.filter(Boolean);
+        if (stableLabels.length === 0) return false;
+        const targetPattern = /29,\s*Wednesday,\s*no available times|August\s+2,\s*Sunday,\s*no available times|August\s+4,\s*Tuesday,\s*no available times/i;
+        return stableLabels.some((aria) => targetPattern.test(aria));
       },
-      { timeout: 30000 }
+      { timeout: 60000 }
     ).catch(() => null);
 
     // Try to read any global data first
