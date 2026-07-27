@@ -7,7 +7,7 @@
     "prebuild": "npm install",
     "postinstall": "npx playwright install",
     "build": "esbuild src/index.js --bundle --outfile=public/bundle.js --loader:.js=jsx --platform=browser",
-    "start": "node server.js",
+    "start": "npx playwright install && node server.js",
     "dev": "node server.js"
   },
   "keywords": [
