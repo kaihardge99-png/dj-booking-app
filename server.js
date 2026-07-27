@@ -1501,7 +1501,11 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       page.waitForSelector('button[aria-label]', { timeout: 30000 }),
       page.waitForSelector('text=July 2026', { timeout: 30000 }).catch(() => null),
     ]);
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
+    await page.waitForFunction(
+      () => document.querySelectorAll('button[aria-label]').length >= 60,
+      { timeout: 30000 }
+    ).catch(() => null);
 
     // Try to read any global data first
     const globals = await page.evaluate(() => {
@@ -1596,10 +1600,15 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     };
 
     const blockedDates = new Set();
+    const parseFailures = [];
     if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
       for (const lab of unavailableLabels.unavailableLabels) {
         const iso = parseLabelToDate(lab);
-        if (iso) blockedDates.add(iso);
+        if (iso) {
+          blockedDates.add(iso);
+        } else {
+          parseFailures.push(lab);
+        }
       }
     }
 
@@ -1640,7 +1649,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       console.error('[APPT_SYNC] cleanup error', err && err.message);
     }
 
-    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates) };
+    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates), parseFailures };
   } catch (error) {
     console.error('[APPT_SYNC] Error scraping appointment page:', error && error.message);
     return { success: false, error: error && error.message };
