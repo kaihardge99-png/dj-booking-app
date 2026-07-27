@@ -1496,7 +1496,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     browser = await chromium.launch(launchOptions);
     const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' });
     const page = await context.newPage();
-    await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(1500);
 
     // Try to read any global data first
