@@ -1584,23 +1584,34 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       nextMonthText = await getMonthYearText();
     }
 
-    const mergedUnavailableLabels = new Set(initialPageData.unavailableLabels);
-    if (nextMonthData && Array.isArray(nextMonthData.unavailableLabels)) {
-      nextMonthData.unavailableLabels.forEach((label) => mergedUnavailableLabels.add(label));
+    const pageData = [
+      {
+        monthYearText: initialMonthYearText,
+        unavailableLabels: initialPageData.unavailableLabels,
+        allLabels: initialPageData.allLabels,
+        buttonCount: initialPageData.buttonCount,
+      },
+    ];
+    if (nextMonthData) {
+      pageData.push({
+        monthYearText: nextMonthText,
+        unavailableLabels: nextMonthData.unavailableLabels,
+        allLabels: nextMonthData.allLabels,
+        buttonCount: nextMonthData.buttonCount,
+      });
     }
 
     const unavailableLabels = {
       allLabels: Array.from(new Set([...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])])),
-      unavailableLabels: Array.from(mergedUnavailableLabels),
+      unavailableLabels: Array.from(new Set([...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])])),
       buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
     };
 
-    const monthYearText = [initialMonthYearText, nextMonthText].filter(Boolean).join(', ');
+    const monthYearText = pageData.map((p) => p.monthYearText).filter(Boolean).join(', ');
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
-    // Convert human-friendly labels like "27, Monday, today, no available times" into ISO dates
-    const parseLabelToDate = (label) => {
+    const parseLabelToDate = (label, currentMonthYearText) => {
       if (!label) return null;
       const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no available slots|no availability|unavailable|not available/gi, '').trim();
       const parts = cleaned.split(',').map((part) => part.trim()).filter(Boolean);
@@ -1621,7 +1632,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       if (explicitMonthMatch) {
         const monthName = explicitMonthMatch[1];
         const day = explicitMonthMatch[2];
-        const yearCandidate = monthYearText ? monthYearText.split(', ').pop().split(' ')[1] : new Date().getFullYear();
+        const yearCandidate = currentMonthYearText ? currentMonthYearText.split(' ')[1] : new Date().getFullYear();
         const year = yearCandidate || new Date().getFullYear();
         const candidate = `${monthName} ${day} ${year}`;
         const parsed = tryParse(candidate);
@@ -1642,10 +1653,10 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           if (parsed) return parsed;
         }
 
-        if (monthYearText) {
+        if (currentMonthYearText) {
           const numericDay = first.match(/^(\d{1,2})$/);
           if (numericDay) {
-            const candidate = `${numericDay[1]} ${monthYearText}`;
+            const candidate = `${numericDay[1]} ${currentMonthYearText}`;
             const parsed = tryParse(candidate);
             if (parsed) return parsed;
           }
@@ -1660,13 +1671,17 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
 
     const blockedDates = new Set();
     const parseFailures = [];
-    if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
-      for (const lab of unavailableLabels.unavailableLabels) {
-        const iso = parseLabelToDate(lab);
-        if (iso) {
-          blockedDates.add(iso);
-        } else {
-          parseFailures.push(lab);
+    if (pageData.length > 0) {
+      for (const page of pageData) {
+        if (Array.isArray(page.unavailableLabels) && page.unavailableLabels.length) {
+          for (const lab of page.unavailableLabels) {
+            const iso = parseLabelToDate(lab, page.monthYearText);
+            if (iso) {
+              blockedDates.add(iso);
+            } else {
+              parseFailures.push(lab);
+            }
+          }
         }
       }
     }
