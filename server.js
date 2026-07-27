@@ -1530,8 +1530,10 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const collectUnavailableLabels = async () => {
       return await page.evaluate(() => {
         const labels = new Set();
+        // Only collect labels from actual grid cells (calendar days), not from time slot buttons
+        const gridCells = Array.from(document.querySelectorAll('button[aria-label][data-grid-cell="true"]'));
         const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
-        allButtons.forEach((button) => {
+        gridCells.forEach((button) => {
           const aria = button.getAttribute('aria-label');
           if (!aria) return;
           const lower = aria.toLowerCase();
@@ -1540,9 +1542,10 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           }
         });
         return {
-          allLabels: allButtons.slice(0, 200).map((button) => button.getAttribute('aria-label')),
+          allLabels: gridCells.slice(0, 200).map((button) => button.getAttribute('aria-label')),
           unavailableLabels: Array.from(labels),
           buttonCount: allButtons.length,
+          gridCellCount: gridCells.length,
         };
       });
     };
