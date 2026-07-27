@@ -1501,9 +1501,12 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       page.waitForSelector('button[aria-label]', { timeout: 30000 }),
       page.waitForSelector('text=July 2026', { timeout: 30000 }).catch(() => null),
     ]);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(10000);
     await page.waitForFunction(
-      () => document.querySelectorAll('button[aria-label]').length >= 60,
+      () => {
+        const labels = Array.from(document.querySelectorAll('button[aria-label]')).map((button) => button.getAttribute('aria-label') || '');
+        return labels.some((aria) => /29,\s*Wednesday,\s*no available times/i.test(aria)) || labels.some((aria) => /August\s+2,\s*Sunday,\s*no available times/i.test(aria)) || labels.some((aria) => /August\s+4,\s*Tuesday,\s*no available times/i.test(aria));
+      },
       { timeout: 30000 }
     ).catch(() => null);
 
