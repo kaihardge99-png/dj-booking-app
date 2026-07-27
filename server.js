@@ -1555,6 +1555,16 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
         return null;
       };
 
+      const explicitMonthMatch = cleaned.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})/i);
+      if (explicitMonthMatch) {
+        const monthName = explicitMonthMatch[1];
+        const day = explicitMonthMatch[2];
+        const year = monthYearText && monthYearText.split(' ')[1] ? monthYearText.split(' ')[1] : new Date().getFullYear();
+        const candidate = `${monthName} ${day} ${year}`;
+        const parsed = tryParse(candidate);
+        if (parsed) return parsed;
+      }
+
       if (parts.length > 0) {
         const first = parts[0];
         if (monthNamePattern.test(first)) {
@@ -1579,7 +1589,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
         }
       }
 
-      const parsedDirect = tryParse(label);
+      const parsedDirect = tryParse(cleaned);
       if (parsedDirect) return parsedDirect;
 
       return null;
