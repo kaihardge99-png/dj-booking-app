@@ -16,24 +16,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libcups2 \
     libdbus-1-3 \
-    libdrm2 \
+    libexpat1 \
+    libfontconfig1 \
     libgbm1 \
     libgdk-pixbuf2.0-0 \
     libgraphene-1.0-0 \
+    libgtk-3-0 \
     libgtk-4-1 \
+    libglib2.0-0 \
+    libgcc-s1 \
     libnspr4 \
     libnss3 \
     libx11-6 \
+    libx11-xcb1 \
     libxcomposite1 \
     libxcursor1 \
     libxdamage1 \
     libxext6 \
     libxfixes3 \
     libxi6 \
+    libxinerama1 \
     libxrandr2 \
     libxrender1 \
     libxss1 \
     libxtst6 \
+    libxv1 \
     libxkbcommon0 \
     libxkbcommon-x11-0 \
     libpangocairo-1.0-0 \
@@ -55,9 +62,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-color-emoji \
   && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies, build frontend, and prune dev dependencies
+# Install dependencies, download Playwright browsers, build frontend, and prune dev dependencies
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install && npx playwright install chromium
 
 COPY . .
 RUN npm run build
