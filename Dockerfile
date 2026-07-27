@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon-x11-0 \
     libpangocairo-1.0-0 \
     libpango-1.0-0 \
+    libasound2 \
     libxshmfence1 \
     libxcb1 \
     libxcb-dri3-0 \
