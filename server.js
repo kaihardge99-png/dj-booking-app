@@ -1527,30 +1527,75 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       };
     });
 
-    // Heuristic: find unavailable day buttons and parse their aria-labels into dates
-    const unavailableLabels = await page.evaluate(() => {
-      const labels = new Set();
-      const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
-      allButtons.forEach((button) => {
-        const aria = button.getAttribute('aria-label');
-        if (!aria) return;
-        const lower = aria.toLowerCase();
-        if (/no available times|no available time|no available slots|no availability|unavailable|not available/i.test(lower)) {
-          labels.add(aria);
-        }
+    const collectUnavailableLabels = async () => {
+      return await page.evaluate(() => {
+        const labels = new Set();
+        const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
+        allButtons.forEach((button) => {
+          const aria = button.getAttribute('aria-label');
+          if (!aria) return;
+          const lower = aria.toLowerCase();
+          if (/no available times|no available time|no available slots|no availability|unavailable|not available/i.test(lower)) {
+            labels.add(aria);
+          }
+        });
+        return {
+          allLabels: allButtons.slice(0, 200).map((button) => button.getAttribute('aria-label')),
+          unavailableLabels: Array.from(labels),
+          buttonCount: allButtons.length,
+        };
       });
-      return {
-        allLabels: allButtons.slice(0, 200).map((button) => button.getAttribute('aria-label')),
-        unavailableLabels: Array.from(labels),
-        buttonCount: allButtons.length,
-      };
-    });
+    };
 
-    const monthYearText = await page.evaluate(() => {
-      const bodyText = document.body.innerText || '';
-      const match = bodyText.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/);
-      return match ? match[0] : null;
-    });
+    const getMonthYearText = async () => {
+      return await page.evaluate(() => {
+        const bodyText = document.body.innerText || '';
+        const match = bodyText.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/);
+        return match ? match[0] : null;
+      });
+    };
+
+    const waitForMonthLabels = async (pattern) => {
+      await page.waitForFunction(
+        (patternText) => {
+          const buttons = Array.from(document.querySelectorAll('button[aria-label]'));
+          return buttons.some((button) => {
+            const aria = button.getAttribute('aria-label') || '';
+            return new RegExp(patternText, 'i').test(aria);
+          });
+        },
+        pattern,
+        { timeout: 30000 }
+      ).catch(() => null);
+    };
+
+    const initialMonthYearText = await getMonthYearText();
+    const initialPageData = await collectUnavailableLabels();
+
+    let nextMonthData = null;
+    let nextMonthText = null;
+    const nextMonthButton = await page.$('button[aria-label="Next month"]');
+    if (nextMonthButton) {
+      await nextMonthButton.click();
+      await page.waitForTimeout(5000);
+      await page.waitForLoadState('networkidle').catch(() => null);
+      await waitForMonthLabels('August\\s+\\d{1,2}');
+      nextMonthData = await collectUnavailableLabels();
+      nextMonthText = await getMonthYearText();
+    }
+
+    const mergedUnavailableLabels = new Set(initialPageData.unavailableLabels);
+    if (nextMonthData && Array.isArray(nextMonthData.unavailableLabels)) {
+      nextMonthData.unavailableLabels.forEach((label) => mergedUnavailableLabels.add(label));
+    }
+
+    const unavailableLabels = {
+      allLabels: Array.from(new Set([...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])])),
+      unavailableLabels: Array.from(mergedUnavailableLabels),
+      buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
+    };
+
+    const monthYearText = [initialMonthYearText, nextMonthText].filter(Boolean).join(', ');
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
@@ -1576,7 +1621,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       if (explicitMonthMatch) {
         const monthName = explicitMonthMatch[1];
         const day = explicitMonthMatch[2];
-        const year = monthYearText && monthYearText.split(' ')[1] ? monthYearText.split(' ')[1] : new Date().getFullYear();
+        const yearCandidate = monthYearText ? monthYearText.split(', ').pop().split(' ')[1] : new Date().getFullYear();
+        const year = yearCandidate || new Date().getFullYear();
         const candidate = `${monthName} ${day} ${year}`;
         const parsed = tryParse(candidate);
         if (parsed) return parsed;
