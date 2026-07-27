@@ -37,3 +37,4 @@ Quick steps to deploy this project to Render (no prior Render experience assumed
 6) Deploy and monitor logs in Render dashboard. Once the service is live you will get a stable public URL.
 
 If you want, I can open the Render dashboard and walk you step-by-step, or automate creation if you provide the Render API key and a GitHub repo URL. For security, do NOT paste secrets in chat unless you understand the risk.
+# Trigger: Mon Jul 27 17:03:17 AEST 2026
