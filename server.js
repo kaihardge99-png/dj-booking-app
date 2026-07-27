@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -1478,6 +1480,118 @@ app.post('/api/sync-google-calendar', verifyAdminToken, async (req, res) => {
     }
 
     const result = await fetchAndSyncGoogleCalendar(calendarId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Scrape appointment booking page (headless) and add blocked dates where no slots
+const fetchAndSyncAppointmentPage = async (pageUrl) => {
+  let browser = null;
+  try {
+    const launchOptions = {
+      args: chromium.args || ['--no-sandbox', '--disable-setuid-sandbox'],
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    };
+
+    browser = await puppeteer.launch(launchOptions);
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+    await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForTimeout(1500);
+
+    // Try to read any global data first
+    const globals = await page.evaluate(() => {
+      return {
+        IJ_values: typeof window.IJ_values !== 'undefined' ? window.IJ_values : null,
+        WIZ: typeof window.WIZ_global_data !== 'undefined' ? window.WIZ_global_data : null,
+        text: document.body.innerText.slice(0, 20000),
+      };
+    });
+
+    // Heuristic: find elements that indicate a date has "no times" or is disabled
+    const unavailableLabels = await page.evaluate(() => {
+      const matches = new Set();
+      const text = document.body.innerText || '';
+      if (/no times available|no available times|no slots available|no availability/i.test(text)) {
+        // try to find aria-labels for calendar days with disabled markers
+        const els = Array.from(document.querySelectorAll('[aria-label]'));
+        els.forEach((el) => {
+          const aria = el.getAttribute('aria-label');
+          const cls = (el.className || '').toLowerCase();
+          const inner = (el.innerText || '').toLowerCase();
+          const disabled = el.getAttribute('aria-disabled') === 'true' || /disabled|unavailable|not available|no times/i.test(inner + ' ' + cls);
+          if (disabled && aria) matches.add(aria);
+        });
+      }
+
+      // As fallback, look for calendar day buttons that contain "unavailable"
+      const labeled = Array.from(document.querySelectorAll('button,div,span')).filter(n => n.getAttribute && n.getAttribute('aria-label'));
+      labeled.forEach((el) => {
+        const aria = el.getAttribute('aria-label');
+        const inner = (el.innerText || '').toLowerCase();
+        if (/unavailable|no times|no availability|not available/i.test(inner) && aria) matches.add(aria);
+      });
+
+      return Array.from(matches);
+    });
+
+    // Convert human-friendly labels like "Monday, July 27, 2026" into ISO dates
+    const parseLabelToDate = (label) => {
+      try {
+        const d = new Date(label);
+        if (isNaN(d.getTime())) return null;
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const blockedDates = new Set();
+    if (Array.isArray(unavailableLabels) && unavailableLabels.length) {
+      for (const lab of unavailableLabels) {
+        const iso = parseLabelToDate(lab);
+        if (iso) blockedDates.add(iso);
+      }
+    }
+
+    // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
+    if (blockedDates.size === 0 && /no times available|no availability/i.test(globals.text || '')) {
+      // As a conservative measure, do not auto-block anything without explicit labels
+    }
+
+    // Insert blocked dates into DB
+    const stmt = db.prepare('INSERT OR IGNORE INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
+    let added = 0;
+    for (const d of blockedDates) {
+      try {
+        await stmt.run(d, 'Appointment page: unavailable', null, null);
+        added++;
+      } catch (err) {
+        console.error('[APPT_SYNC] insert error', err && err.message);
+      }
+    }
+
+    return { success: true, addedCount: added, detected: Array.from(blockedDates) };
+  } catch (error) {
+    console.error('[APPT_SYNC] Error scraping appointment page:', error && error.message);
+    return { success: false, error: error && error.message };
+  } finally {
+    if (browser) await browser.close();
+  }
+};
+
+// Endpoint to sync appointment page via headless browser
+app.post('/api/sync-appointment-page', verifyAdminToken, async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    const result = await fetchAndSyncAppointmentPage(url);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

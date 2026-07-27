@@ -27,6 +27,9 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
   const [googleCalendarId, setGoogleCalendarId] = useState('allfriendsavhire@gmail.com');
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [appointmentUrl, setAppointmentUrl] = useState('https://calendar.app.google/LkuhqT6XWh8MdfEWA');
+  const [apptSyncing, setApptSyncing] = useState(false);
+  const [apptSyncMessage, setApptSyncMessage] = useState('');
 
   useEffect(() => {
     fetchBookings();
@@ -131,6 +134,37 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
       setSyncMessage('Error syncing calendar');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSyncAppointmentPage = async (e) => {
+    e.preventDefault();
+    setApptSyncing(true);
+    setApptSyncMessage('');
+    try {
+      const response = await fetch('/api/sync-appointment-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ url: appointmentUrl }),
+      });
+      if (response.ok) {
+        const r = await response.json();
+        if (r.success) {
+          setApptSyncMessage(`✓ Scraped: added ${r.addedCount} blocked dates`);
+          fetchBlockedDates();
+        } else {
+          setApptSyncMessage(r.error || 'No dates detected');
+        }
+      } else {
+        const data = await response.json();
+        setApptSyncMessage(data.error || 'Error scraping appointment page');
+      }
+    } catch (err) {
+      console.error('Error scraping appointment page:', err);
+      setApptSyncMessage('Error scraping appointment page');
+    } finally {
+      setApptSyncing(false);
+      setTimeout(() => setApptSyncMessage(''), 5000);
     }
   };
 
@@ -622,6 +656,34 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
               {syncMessage && (
                 <div className={`message ${syncMessage.includes('✓') ? 'success' : 'error'}`}>
                   {syncMessage}
+                </div>
+              )}
+            </form>
+
+            <hr style={{ margin: '30px 0', borderColor: '#ddd' }} />
+
+            <h2>Appointment Page Sync (Headless)</h2>
+            <p style={{ color: '#666', marginBottom: '15px' }}>
+              Scrape your public booking page to detect dates with no available slots and add them as blocked dates in the app.
+            </p>
+            <form onSubmit={handleSyncAppointmentPage} className="settings-form">
+              <div className="form-group">
+                <label htmlFor="appointment_page_url">Appointment Page URL</label>
+                <input
+                  type="url"
+                  id="appointment_page_url"
+                  value={appointmentUrl}
+                  onChange={(e) => setAppointmentUrl(e.target.value)}
+                  placeholder="https://calendar.app.google/...."
+                />
+                <small>Public booking page URL (e.g. Google appointment link)</small>
+              </div>
+              <button type="submit" className="save-btn" disabled={apptSyncing}>
+                {apptSyncing ? 'Scraping...' : 'Sync Appointment Page'}
+              </button>
+              {apptSyncMessage && (
+                <div className={`message ${apptSyncMessage.includes('✓') ? 'success' : 'error'}`}>
+                  {apptSyncMessage}
                 </div>
               )}
             </form>
