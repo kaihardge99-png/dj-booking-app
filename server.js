@@ -1508,45 +1508,53 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       };
     });
 
-    // Heuristic: find elements that indicate a date has "no times" or is disabled
+    // Heuristic: find unavailable day buttons and parse their aria-labels into dates
     const unavailableLabels = await page.evaluate(() => {
-      const matches = new Set();
-      const text = document.body.innerText || '';
-      if (/no times available|no available times|no slots available|no availability/i.test(text)) {
-        // try to find aria-labels for calendar days with disabled markers
-        const els = Array.from(document.querySelectorAll('[aria-label]'));
-        els.forEach((el) => {
-          const aria = el.getAttribute('aria-label');
-          const cls = (el.className || '').toLowerCase();
-          const inner = (el.innerText || '').toLowerCase();
-          const disabled = el.getAttribute('aria-disabled') === 'true' || /disabled|unavailable|not available|no times/i.test(inner + ' ' + cls);
-          if (disabled && aria) matches.add(aria);
-        });
-      }
+      const labels = new Set();
 
-      // As fallback, look for calendar day buttons that contain "unavailable"
-      const labeled = Array.from(document.querySelectorAll('button,div,span')).filter(n => n.getAttribute && n.getAttribute('aria-label'));
-      labeled.forEach((el) => {
-        const aria = el.getAttribute('aria-label');
-        const inner = (el.innerText || '').toLowerCase();
-        if (/unavailable|no times|no availability|not available/i.test(inner) && aria) matches.add(aria);
+      const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
+      allButtons.forEach((button) => {
+        const aria = button.getAttribute('aria-label');
+        if (!aria) return;
+        const lower = aria.toLowerCase();
+        if (/no available times|no available time|no available slots|no available times|no available slots|no availability|unavailable|not available/i.test(lower)) {
+          labels.add(aria);
+        }
       });
 
-      return Array.from(matches);
+      return Array.from(labels);
     });
 
-    // Convert human-friendly labels like "Monday, July 27, 2026" into ISO dates
+    const monthYearText = await page.evaluate(() => {
+      const header = document.querySelector('div[role="heading"]') || document.querySelector('div[jsname="EK1Aod"]') || document.querySelector('.mUIrbf-TI6wPd-Bz112c');
+      return header ? header.innerText : null;
+    });
+
+    // Convert human-friendly labels like "27, Monday, today, no available times" into ISO dates
     const parseLabelToDate = (label) => {
-      try {
-        const d = new Date(label);
-        if (isNaN(d.getTime())) return null;
+      if (!label) return null;
+      const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no availability|unavailable|not available/gi, '').trim();
+      const parts = cleaned.split(',').map((part) => part.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const dayPart = parts[0];
+        const monthYearPart = parts.length >= 3 ? `${parts[1]} ${parts[2]}` : monthYearText;
+        const candidate = `${dayPart} ${monthYearPart}`;
+        const d = new Date(candidate);
+        if (!isNaN(d.getTime())) {
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd}`;
+        }
+      }
+      const d = new Date(label);
+      if (!isNaN(d.getTime())) {
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}`;
-      } catch (e) {
-        return null;
       }
+      return null;
     };
 
     const blockedDates = new Set();
