@@ -5,8 +5,6 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
   const [activeTab, setActiveTab] = useState('bookings');
   const [bookings, setBookings] = useState([]);
   const [blockedDates, setBlockedDates] = useState([]);
-  const [calendarStatus, setCalendarStatus] = useState({ googleCalendarLinked: false, authMode: 'none' });
-  const [calendarUnavailableDates, setCalendarUnavailableDates] = useState([]);
   const [newBlockedDate, setNewBlockedDate] = useState('');
   const [newBlockedStartTime, setNewBlockedStartTime] = useState('');
   const [newBlockedEndTime, setNewBlockedEndTime] = useState('');
@@ -26,30 +24,19 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
   const [maxBookingDays, setMaxBookingDays] = useState(30);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+  const [googleCalendarId, setGoogleCalendarId] = useState('allfriendsavhire@gmail.com');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
 
   useEffect(() => {
     fetchBookings();
     fetchBlockedDates();
-    fetchCalendarAvailability();
     fetchSettings();
   }, []);
 
   const authHeaders = adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
 
-  const fetchCalendarAvailability = async () => {
-    try {
-      const today = new Date();
-      const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-      const response = await fetch(`/api/availability?month=${month}`, { headers: authHeaders });
-      if (!response.ok) return;
 
-      const data = await response.json();
-      setCalendarStatus(data.source || { googleCalendarLinked: false, authMode: 'none' });
-      setCalendarUnavailableDates(data.unavailableDates || []);
-    } catch (error) {
-      console.error('Error fetching calendar availability:', error);
-    }
-  };
 
   const fetchBookings = async () => {
     try {
@@ -118,6 +105,35 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
     }
   };
 
+  const handleSyncGoogleCalendar = async (e) => {
+    e.preventDefault();
+    setSyncing(true);
+    setSyncMessage('');
+
+    try {
+      const response = await fetch('/api/sync-google-calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ calendarId: googleCalendarId }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setSyncMessage(`✓ Synced! Found ${result.totalEvents} events, added ${result.addedCount} blocked dates.`);
+        fetchBlockedDates(); // Refresh blocked dates list
+        setTimeout(() => setSyncMessage(''), 5000);
+      } else {
+        const data = await response.json();
+        setSyncMessage(data.error || 'Error syncing calendar');
+      }
+    } catch (error) {
+      console.error('Error syncing Google Calendar:', error);
+      setSyncMessage('Error syncing calendar');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const calculateStats = (bookingsList) => {
     const stats = {
       total: bookingsList.length,
@@ -179,7 +195,6 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
         setNewBlockedEndTime('');
         setNewBlockedReason('');
         fetchBlockedDates();
-        fetchCalendarAvailability();
         onBlockedDatesUpdate();
       }
     } catch (error) {
@@ -244,7 +259,6 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
       if (response.ok) {
         handleCancelEdit();
         fetchBlockedDates();
-        fetchCalendarAvailability();
         onBlockedDatesUpdate();
       }
     } catch (error) {
@@ -269,7 +283,6 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
       if (response.ok) {
         setImportJsonText('');
         fetchBlockedDates();
-        fetchCalendarAvailability();
         onBlockedDatesUpdate();
         alert('Imported successfully');
       } else {
@@ -308,33 +321,15 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
 
         <div className="calendar-status-card">
           <div className="calendar-status-header">
-            <h3>Calendar Availability</h3>
-            <span className={`status-pill ${calendarStatus.googleCalendarLinked ? 'active' : 'inactive'}`}>
-              {calendarStatus.googleCalendarLinked ? 'Linked' : 'Not linked'}
-            </span>
+            <h3>Availability</h3>
+            <span className="status-pill active">App schedule</span>
           </div>
           <p>
-            Source: <strong>{calendarStatus.authMode.replace('_', ' ')}</strong>
+            Source: <strong>App schedule</strong>
           </p>
-          {calendarStatus.googleCalendarLinked ? (
-            <div className="calendar-unavailable-list">
-              <strong>Unavailable dates this month:</strong>
-              {calendarUnavailableDates.length > 0 ? (
-                <ul>
-                  {calendarUnavailableDates.slice(0, 5).map((date) => (
-                    <li key={date}>{date}</li>
-                  ))}
-                  {calendarUnavailableDates.length > 5 && <li>...and more</li>}
-                </ul>
-              ) : (
-                <p>No unavailable dates were found.</p>
-              )}
-            </div>
-          ) : (
-            <p className="calendar-help-text">
-              If your Google Calendar is linked, unavailable dates will appear here.
-            </p>
-          )}
+          <p className="calendar-help-text">
+            Unavailable dates are calculated from app blocked dates and existing bookings.
+          </p>
         </div>
 
         {/* Tabs */}
@@ -599,6 +594,34 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
               {settingsMessage && (
                 <div className={`message ${settingsMessage.includes('successfully') ? 'success' : 'error'}`}>
                   {settingsMessage}
+                </div>
+              )}
+            </form>
+
+            <hr style={{ margin: '30px 0', borderColor: '#ddd' }} />
+
+            <h2>Google Calendar Sync</h2>
+            <p style={{ color: '#666', marginBottom: '15px' }}>
+              Automatically sync blocked dates and events from your Google Calendar to the app.
+            </p>
+            <form onSubmit={handleSyncGoogleCalendar} className="settings-form">
+              <div className="form-group">
+                <label htmlFor="google_calendar_id">Google Calendar Email</label>
+                <input
+                  type="email"
+                  id="google_calendar_id"
+                  value={googleCalendarId}
+                  onChange={(e) => setGoogleCalendarId(e.target.value)}
+                  placeholder="your-email@gmail.com"
+                />
+                <small>The email address of your public Google Calendar</small>
+              </div>
+              <button type="submit" className="save-btn" disabled={syncing}>
+                {syncing ? 'Syncing...' : 'Sync Google Calendar'}
+              </button>
+              {syncMessage && (
+                <div className={`message ${syncMessage.includes('✓') ? 'success' : 'error'}`}>
+                  {syncMessage}
                 </div>
               )}
             </form>

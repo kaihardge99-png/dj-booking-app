@@ -8,7 +8,6 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
   const [apiSlotsByDate, setApiSlotsByDate] = useState({});
   const [apiFullDayBlockedDates, setApiFullDayBlockedDates] = useState([]);
   const [apiPartialBlockedSegments, setApiPartialBlockedSegments] = useState([]);
-  const [googleCalendarStatus, setGoogleCalendarStatus] = useState({ linked: false, authMode: 'none' });
   const [maxBookingDays, setMaxBookingDays] = useState(30);
 
   const OPERATING_HOURS = {
@@ -47,10 +46,6 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
         setApiSlotsByDate(data.slotsByDate || {});
         setApiFullDayBlockedDates(data.fullDayBlockedDates || []);
         setApiPartialBlockedSegments(data.partialBlockedSegments || []);
-        setGoogleCalendarStatus({
-          linked: Boolean(data.source?.googleCalendarLinked),
-          authMode: data.source?.authMode || 'none',
-        });
       } catch (error) {
         console.error('Error fetching availability:', error);
       }
@@ -161,15 +156,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
         <div className="calendar-header">
           <h3>Select Date & Time</h3>
           <p className="calendar-connected">
-            {googleCalendarStatus.linked
-              ? `Google Calendar availability is active (${googleCalendarStatus.authMode}).`
-              : 'Google Calendar not linked. Set GOOGLE_CALENDAR_ICS_URL or GOOGLE_CALENDAR_ID + GOOGLE_API_KEY in your environment.'}
+            Availability is based on app schedule and blocked dates.
           </p>
-          {apiUnavailableDates.length > 0 && (
-            <p className="calendar-connected" style={{ marginTop: '4px', fontSize: '0.9rem' }}>
-              Auto-blocked dates from Google booking availability: {apiUnavailableDates.slice(0, 5).join(', ')}{apiUnavailableDates.length > 5 ? '...' : ''}
-            </p>
-          )}
         </div>
 
         {/* Calendar */}

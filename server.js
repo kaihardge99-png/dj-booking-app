@@ -7,45 +7,17 @@ const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
-const axios = require('axios');
-const { google } = require('googleapis');
-const { parseUnavailableDatesFromLabels, getMonthDateRange } = require('./googleAppointmentAvailability');
 require('dotenv').config();
-
-let puppeteer = null;
-let chromium = null;
-try {
-  puppeteer = require('puppeteer-core');
-    chromium = require('@sparticuz/chromium').default || require('@sparticuz/chromium');
-  console.log('✓ Puppeteer and Chromium successfully loaded');
-} catch (error) {
-  console.warn('Puppeteer/Chromium not available:', error.message);
-  console.warn('This is expected if running in a browser environment');
-}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const usePostgres = Boolean(process.env.DATABASE_URL);
-const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || '';
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
-let OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
-// Use the canonical Google Calendar appointments schedule URL as the fallback
-// This is more stable than short dynamic links which can return 'Dynamic Link Not Found'
-const FALLBACK_GOOGLE_APPOINTMENT_URL = 'https://calendar.google.com/calendar/appointments/schedules/AcZssZ1dBFFce1RD4OkFzmuYGWnmjmyWoWjiAIn0mrPu2v8nMIdfLgMUV22Lpug3UBEzWthPCyxhrKbl';
-const GOOGLE_APPOINTMENT_URL = process.env.GOOGLE_APPOINTMENT_URL || FALLBACK_GOOGLE_APPOINTMENT_URL;
-const CHROME_EXECUTABLE_PATH = process.env.CHROME_EXECUTABLE_PATH || '';
-const APPOINTMENT_AVAILABILITY_CACHE = new Map();
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
 
 console.log('[CONFIG] Environment variables available:');
-console.log('[CONFIG] GOOGLE_APPOINTMENT_URL:', process.env.GOOGLE_APPOINTMENT_URL ? '✓ SET' : '✗ NOT SET', `(using ${GOOGLE_APPOINTMENT_URL === FALLBACK_GOOGLE_APPOINTMENT_URL ? 'fallback' : 'env'})`);
-console.log('[CONFIG] GOOGLE_CALENDAR_ICS_URL:', process.env.GOOGLE_CALENDAR_ICS_URL ? '✓ SET' : '✗ NOT SET');
 console.log('[CONFIG] NODE_ENV:', process.env.NODE_ENV);
 console.log('[CONFIG] PORT:', PORT);
-const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
-const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
-const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Australia/Sydney';
-const PRIMARY_AVAILABILITY_SOURCE = GOOGLE_APPOINTMENT_URL ? 'appointment' : (GOOGLE_CALENDAR_ICS_URL ? 'ics' : 'none');
 
 // Ensure JWT secret is set (provide a safe fallback for local development)
 const isProd = process.env.NODE_ENV === 'production';
@@ -302,22 +274,6 @@ const sqliteSchema = `
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS calendar_events_cache (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_uid TEXT UNIQUE,
-    event_date TEXT NOT NULL,
-    start_time TEXT,
-    end_time TEXT,
-    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS calendar_ignores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL UNIQUE,
-    reason TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
   CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -369,20 +325,6 @@ const postgresSchemaStatements = [
     end_time TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   )`,
-  `CREATE TABLE IF NOT EXISTS calendar_events_cache (
-    id SERIAL PRIMARY KEY,
-    event_uid TEXT UNIQUE,
-    event_date TEXT NOT NULL,
-    start_time TEXT,
-    end_time TEXT,
-    last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-  )`,
-  `CREATE TABLE IF NOT EXISTS calendar_ignores (
-    id SERIAL PRIMARY KEY,
-    date TEXT NOT NULL UNIQUE,
-    reason TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-  )`,
   `CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
     key TEXT NOT NULL UNIQUE,
@@ -413,28 +355,6 @@ const initializeDatabase = async () => {
     await ensureBlockedDatesColumns();
     await ensureBookingUsernameColumn();
   }
-};
-
-// Periodic calendar sync: poll Google Calendar and sync cache/blocks so edits appear automatically
-const startCalendarPolling = (intervalMinutes = 5) => {
-  const run = async () => {
-    try {
-      const now = new Date();
-      const timeMin = now.toISOString();
-      const future = new Date(now);
-      future.setDate(future.getDate() + 30);
-      const timeMax = future.toISOString();
-      const events = await fetchGoogleCalendarEvents(timeMin, timeMax);
-      await syncCalendarEventsAndBlockDeleted(events);
-      console.log('Calendar sync completed', new Date().toISOString());
-    } catch (err) {
-      console.error('Periodic calendar sync error:', err.message);
-    }
-  };
-
-  // Run immediately and then on interval
-  run();
-  setInterval(run, intervalMinutes * 60 * 1000);
 };
 
 // Email configuration
@@ -510,67 +430,9 @@ const getLocalMinuteInfo = (date, timeZone) => {
   };
 };
 
-const getLocalEventRange = (event) => {
-  if (event.start?.date && event.end?.date) {
-    return {
-      fullDay: true,
-      startDate: event.start.date,
-      endDate: event.end.date,
-    };
-  }
-
-  const start = new Date(event.start?.dateTime || event.start?.date);
-  const end = new Date(event.end?.dateTime || event.end?.date);
-
-  const startInfo = getLocalMinuteInfo(start, APP_TIMEZONE);
-  const endInfo = getLocalMinuteInfo(end, APP_TIMEZONE);
-
-  if (!startInfo || !endInfo) return null;
-
-  return {
-    fullDay: false,
-    startDate: startInfo.date,
-    startMinutes: startInfo.minutes,
-    endDate: endInfo.date,
-    endMinutes: endInfo.minutes,
-  };
-};
-
-const getEventRangeForDate = (date, event) => {
-  const eventRange = getLocalEventRange(event);
-  if (!eventRange) return null;
-
-  if (eventRange.fullDay) {
-    if (date >= eventRange.startDate && date < eventRange.endDate) {
-      return { start: 0, end: 24 * 60 };
-    }
-    return null;
-  }
-
-  const { startDate, endDate, startMinutes, endMinutes } = eventRange;
-
-  if (date < startDate || date > endDate) {
-    return null;
-  }
-
-  if (date === startDate && date === endDate) {
-    return { start: startMinutes, end: endMinutes };
-  }
-
-  if (date === startDate) {
-    return { start: startMinutes, end: 24 * 60 };
-  }
-
-  if (date === endDate) {
-    return { start: 0, end: endMinutes };
-  }
-
-  return { start: 0, end: 24 * 60 };
-};
-
 const overlap = (startA, endA, startB, endB) => startA < endB && endA > startB;
 
-const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleEvents) => {
+const listDateAvailability = async (date, blockedDatesRows, bookingRows) => {
   const day = new Date(date).getDay();
   const hours = OPERATING_HOURS[day];
 
@@ -584,10 +446,6 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
 
   const openMinutes = hours.open * 60;
   const closeMinutes = hours.close * 60;
-
-  const googleBusy = googleEvents
-    .map((event) => getEventRangeForDate(date, event))
-    .filter(Boolean);
 
   const blockedBusy = blockedDatesRows
     .filter((row) => row.date === date)
@@ -616,7 +474,7 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
     .filter(Boolean);
 
   const blockedRanges = blockedBusy.map((range) => ({ start: range.start, end: range.end })).filter(Boolean);
-  const busyRanges = [...googleBusy, ...bookingBusy, ...blockedRanges];
+  const busyRanges = [...bookingBusy, ...blockedRanges];
 
   const slots = [];
   for (let slotStart = openMinutes; slotStart < closeMinutes; slotStart += 60) {
@@ -633,724 +491,6 @@ const listDateAvailability = async (date, blockedDatesRows, bookingRows, googleE
     slots,
     isUnavailable: slots.length === 0,
   };
-};
-
-const fetchGoogleCalendarEvents = async (timeMin, timeMax) => {
-  if (!GOOGLE_CALENDAR_ID && !GOOGLE_CALENDAR_ICS_URL) return [];
-
-  try {
-    if (GOOGLE_SERVICE_ACCOUNT_JSON && GOOGLE_CALENDAR_ID) {
-      const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-      });
-      const calendar = google.calendar({ version: 'v3', auth });
-      const response = await calendar.events.list({
-        calendarId: GOOGLE_CALENDAR_ID,
-        singleEvents: true,
-        orderBy: 'startTime',
-        timeMin,
-        timeMax,
-        maxResults: 2500,
-      });
-      return response.data.items || [];
-    }
-
-    if (GOOGLE_API_KEY && GOOGLE_CALENDAR_ID) {
-      const response = await axios.get(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(GOOGLE_CALENDAR_ID)}/events`, {
-        params: {
-          key: GOOGLE_API_KEY,
-          singleEvents: true,
-          orderBy: 'startTime',
-          timeMin,
-          timeMax,
-          maxResults: 2500,
-        },
-      });
-
-      return response.data.items || [];
-    }
-
-    if (GOOGLE_CALENDAR_ICS_URL) {
-      const response = await axios.get(GOOGLE_CALENDAR_ICS_URL);
-      return parseIcsEvents(response.data || '');
-    }
-
-    return [];
-  } catch (error) {
-    console.error('Google Calendar fetch error:', error.message);
-    return [];
-  }
-};
-
-const normalizeAppointmentDate = (timestampSeconds) => {
-  const date = new Date(timestampSeconds * 1000);
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-};
-
-const normalizeAppointmentTime = (timestampSeconds) => {
-  const date = new Date(timestampSeconds * 1000);
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: APP_TIMEZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-  const hour = parts.find((p) => p.type === 'hour')?.value || '00';
-  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
-  return `${hour}:${minute}`;
-};
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const isAppointmentRpcUrl = (url) => {
-  if (!url || typeof url !== 'string') return false;
-  return /AppointmentBookingService|ListAvailableSlots|calendar-pa\.clients6\.google\.com/.test(url);
-};
-
-const parseAppointmentSlotsPayload = (payload) => {
-  const slots = [];
-
-  const asNumber = (v) => {
-    if (typeof v === 'number') return v;
-    if (typeof v === 'string' && /^\d{9,}$/.test(v)) return Number(v);
-    return null;
-  };
-
-  const normalizeTimestamp = (ts) => {
-    if (ts === null || ts === undefined) return null;
-    let n = asNumber(ts);
-    if (n === null) return null;
-    // If timestamp looks like milliseconds, convert to seconds
-    if (n > 1e12) n = Math.floor(n / 1000);
-    return n;
-  };
-
-  const tryExtractFromArrayPair = (arr) => {
-    if (!Array.isArray(arr) || arr.length < 2) return null;
-    const candTs = normalizeTimestamp(arr[0]) || normalizeTimestamp(arr[1]);
-    const candDur = typeof arr[1] === 'number' ? arr[1] : (typeof arr[2] === 'number' ? arr[2] : null);
-    if (candTs && candDur) return { timestamp: candTs, duration: candDur };
-    return null;
-  };
-
-  const visit = (node) => {
-    if (node === null || node === undefined) return;
-
-    // Direct array pair like [ts, duration]
-    if (Array.isArray(node)) {
-      const maybe = tryExtractFromArrayPair(node);
-      if (maybe) slots.push(maybe);
-
-      for (const item of node) {
-        visit(item);
-      }
-      return;
-    }
-
-    // If object, iterate values
-    if (typeof node === 'object') {
-      for (const k of Object.keys(node)) {
-        visit(node[k]);
-      }
-    }
-  };
-
-  visit(payload);
-  // Deduplicate by timestamp+duration
-  const seen = new Set();
-  const out = [];
-  for (const s of slots) {
-    const key = `${s.timestamp}:${s.duration}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(s);
-    }
-  }
-
-  return out;
-};
-
-const buildAppointmentAvailabilityFromSlots = (payload, month) => {
-  const slots = parseAppointmentSlotsPayload(payload);
-  const map = {};
-
-  slots.forEach(({ timestamp }) => {
-    const date = normalizeAppointmentDate(timestamp);
-    const time = normalizeAppointmentTime(timestamp);
-    if (!map[date]) map[date] = new Set();
-    map[date].add(time);
-  });
-
-  const formatted = {};
-  for (const [date, times] of Object.entries(map)) {
-    formatted[date] = Array.from(times).sort();
-  }
-
-  const unavailableDates = [];
-  if (month && typeof month === 'string') {
-    const [yearStr, monthStr] = String(month).split('-');
-    const year = Number(yearStr);
-    const monthIndex = Number(monthStr) - 1;
-    if (!Number.isNaN(year) && !Number.isNaN(monthIndex)) {
-      const { firstDay, lastDay } = getMonthDateRange(year, monthIndex);
-      for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().slice(0, 10);
-        if (!formatted[dateStr]) {
-          unavailableDates.push(dateStr);
-        }
-      }
-    }
-  }
-
-  return { slotsByDate: formatted, unavailableDates };
-};
-
-const fetchGoogleAppointmentAvailability = async (month, appointmentUrl) => {
-  appointmentUrl = appointmentUrl || OVERRIDE_GOOGLE_APPOINTMENT_URL || GOOGLE_APPOINTMENT_URL;
-  if (!appointmentUrl) return [];
-
-  console.log('[Appointment] Fetching availability for month:', month);
-  console.log('[Appointment] Using appointment URL:', appointmentUrl);
-  console.log('[Appointment] Browser available:', !!puppeteer && !!chromium);
-
-  try {
-    if (!puppeteer || !chromium) {
-      console.warn('[Appointment] Browser not available for appointment page scraping, skipping');
-      return [];
-    }
-
-    const browserArgs = (chromium && chromium.args) ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'];
-    let executablePath = CHROME_EXECUTABLE_PATH;
-    if (!executablePath && process.platform === 'darwin') {
-      const defaultChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-      if (fs.existsSync(defaultChromePath)) {
-        executablePath = defaultChromePath;
-      }
-    }
-    if (!executablePath && chromium && chromium.executablePath) {
-      executablePath = await chromium.executablePath();
-    }
-    if (!executablePath) {
-      console.warn('[Appointment] No browser executable path available, skipping appointment availability fetch');
-      return [];
-    }
-
-    console.log('[Appointment] Launching browser...');
-    let browser = null;
-    const maxLaunchAttempts = 3;
-    for (let attempt = 1; attempt <= maxLaunchAttempts; attempt++) {
-      try {
-        browser = await puppeteer.launch({
-          args: browserArgs,
-          executablePath,
-          headless: true,
-          defaultViewport: chromium.defaultViewport || null,
-        });
-        break;
-      } catch (launchErr) {
-        console.warn(`[Appointment] Browser launch attempt ${attempt} failed:`, launchErr && launchErr.message);
-        // If ETXTBSY or spawn-related, wait and retry
-        if (attempt < maxLaunchAttempts) {
-          const backoff = 1000 * Math.pow(2, attempt);
-          console.log(`[Appointment] Retrying browser launch in ${backoff}ms`);
-          await sleep(backoff);
-          continue;
-        }
-        throw launchErr;
-      }
-    }
-
-    try {
-      const page = await browser.newPage();
-      page.setDefaultNavigationTimeout(120000);
-      page.setDefaultTimeout(120000);
-      await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36');
-      console.log('[Appointment] Navigating to:', appointmentUrl);
-
-      let appointmentResponse = null;
-      const onResponse = (response) => {
-        try {
-          const url = response.url();
-          if (isAppointmentRpcUrl(url)) {
-            appointmentResponse = response;
-            console.log('[Appointment] Captured RPC response URL:', url, 'status=', response.status());
-          }
-        } catch (e) {
-          /* ignore errors from response.url/status */
-        }
-      };
-      page.on('response', onResponse);
-      page.on('requestfailed', (request) => {
-        if (isAppointmentRpcUrl(request.url())) {
-          console.warn('[Appointment] Appointment request failed:', request.url(), request.failure()?.errorText || 'unknown');
-        }
-      });
-
-      await page.goto(appointmentUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 120000,
-      });
-
-      await page.waitForFunction(
-        () => document.readyState === 'complete' || document.querySelector('button[aria-label]'),
-        { timeout: 30000 }
-      ).catch(() => null);
-
-      await sleep(3000);
-
-      if (!appointmentResponse) {
-        try {
-          const response = await page.waitForResponse(
-            (res) => isAppointmentRpcUrl(res.url()),
-            { timeout: 60000 }
-          );
-          if (response) {
-            appointmentResponse = response;
-            console.log('[Appointment] waitForResponse captured RPC URL:', response.url(), 'status=', response.status());
-          }
-        } catch (waitErr) {
-          console.warn('[Appointment] Could not capture appointment RPC response:', waitErr.message);
-        }
-      }
-
-      if (!appointmentResponse) {
-        console.warn('[Appointment] No ListAvailableSlots response found, attempting WIZ_global_data fallback');
-
-        // First try to extract a candidate payload from window.WIZ_global_data
-        const wizCandidate = await page.evaluate(() => {
-          try {
-            const root = window.WIZ_global_data;
-            if (!root) return null;
-
-            const visited = new WeakSet();
-
-            const isTimestampLike = (v) => {
-              if (typeof v === 'number') return v > 1e9; // seconds since epoch
-              if (typeof v === 'string') return /^\d{9,}$/.test(v);
-              return false;
-            };
-
-            const looksLikeSlotNode = (node) => {
-              if (!Array.isArray(node)) return false;
-              // if any child is an array with a timestamp-like first element or contains timestamp-like numbers
-              for (const item of node) {
-                if (Array.isArray(item) && item.length >= 1) {
-                  if (isTimestampLike(item[0]) || isTimestampLike(item[1])) return true;
-                }
-                if (isTimestampLike(item)) return true;
-              }
-              return false;
-            };
-
-            const findNode = (node) => {
-              if (!node || typeof node !== 'object') return null;
-              if (visited.has(node)) return null;
-              visited.add(node);
-
-              if (looksLikeSlotNode(node)) return node;
-
-              if (Array.isArray(node)) {
-                for (const child of node) {
-                  const res = findNode(child);
-                  if (res) return res;
-                }
-              } else {
-                for (const k of Object.keys(node)) {
-                  const res = findNode(node[k]);
-                  if (res) return res;
-                }
-              }
-
-              return null;
-            };
-
-            return findNode(root) || null;
-          } catch (err) {
-            return null;
-          }
-        });
-
-        if (wizCandidate) {
-          console.log('[Appointment] Found WIZ_global_data candidate payload, parsing');
-          // Use the same parsing helpers used for ListAvailableSlots payloads
-          try {
-            const appointmentData = buildAppointmentAvailabilityFromSlots(wizCandidate, month);
-            console.log('[Appointment] Parsed unavailable appointment dates (WIZ):', appointmentData.unavailableDates.length);
-            await page.close();
-            return appointmentData;
-          } catch (err) {
-            console.warn('[Appointment] WIZ_global_data parsing failed:', err && err.message);
-            // fall through to label parse below
-          }
-        }
-        else {
-          // Diagnostic: capture a small summary of WIZ_global_data when present but no candidate found
-          try {
-            const wizSummary = await page.evaluate(() => {
-              try {
-                const root = window.WIZ_global_data;
-                if (!root) return null;
-                const keys = Object.keys(root || {}).slice(0, 20);
-                const sample = {};
-                for (const k of keys) {
-                  const v = root[k];
-                  if (Array.isArray(v)) sample[k] = { type: 'array', len: v.length };
-                  else if (v && typeof v === 'object') sample[k] = { type: 'object', keys: Object.keys(v).slice(0, 10).length };
-                  else sample[k] = { type: typeof v };
-                }
-                return { keys: keys.length, sample };
-              } catch (e) {
-                return { error: e && e.message };
-              }
-            });
-            console.log('[Appointment] WIZ_global_data present but no candidate found:', JSON.stringify(wizSummary));
-          } catch (e) {
-            console.warn('[Appointment] Failed to extract WIZ_global_data summary:', e && e.message);
-          }
-
-          // Try parsing the entire WIZ_global_data root as a last-ditch attempt
-          try {
-            const rootResult = await page.evaluate(() => window.WIZ_global_data);
-            if (rootResult) {
-              try {
-                const parsed = buildAppointmentAvailabilityFromSlots(rootResult, month);
-                if (parsed && (Object.keys(parsed.slotsByDate || {}).length > 0 || (parsed.unavailableDates || []).length > 0)) {
-                  console.log('[Appointment] Parsed appointment data by scanning full WIZ_global_data root');
-                  await page.close();
-                  return parsed;
-                }
-              } catch (err) {
-                console.warn('[Appointment] Parsing full WIZ_global_data failed:', err && err.message);
-              }
-            }
-          } catch (e) {
-            console.warn('[Appointment] Failed to read WIZ_global_data root for parsing:', e && e.message);
-          }
-        }
-        // Last-resort: label parse as before
-        console.warn('[Appointment] Falling back to label parse (no WIZ candidate)');
-        const labels = await page.evaluate(() => {
-          const out = [];
-          const nodes = Array.from(document.querySelectorAll('[aria-label]'));
-          nodes.forEach((el) => {
-            const value = el.getAttribute('aria-label');
-            if (value) out.push(value.trim());
-          });
-          const buttons = Array.from(document.querySelectorAll('button'));
-          buttons.forEach((button) => {
-            const aria = button.getAttribute('aria-label');
-            if (aria) out.push(aria.trim());
-          });
-          const texts = Array.from(document.querySelectorAll('button,div,span'));
-          texts.forEach((el) => {
-            const text = el.textContent?.trim();
-            if (text && /no available times|no availability|no available slots|fully booked/i.test(text)) {
-              out.push(text);
-            }
-          });
-          return Array.from(new Set(out)).filter(Boolean);
-        });
-        console.log('[Appointment] Fallback labels sample:', labels.slice(0, 20));
-        console.log('[Appointment] Label fallback count:', labels.length);
-        await page.close();
-        return {
-          slotsByDate: {},
-          unavailableDates: parseUnavailableDatesFromLabels(labels, month),
-        };
-      }
-
-      let responseText = '';
-      try {
-        responseText = await appointmentResponse.text();
-      } catch (textErr) {
-        try {
-          const buffer = await appointmentResponse.buffer();
-          responseText = buffer.toString('utf8');
-        } catch (bufferErr) {
-          console.error('[Appointment] Failed to read ListAvailableSlots response:', bufferErr.message);
-          await page.close();
-          return { slotsByDate: {}, unavailableDates: [] };
-        }
-      }
-
-      await page.close();
-      let payload;
-      try {
-        payload = JSON.parse(responseText);
-      } catch (parseErr) {
-        console.error('[Appointment] Failed to parse ListAvailableSlots response:', parseErr.message);
-        console.error('[Appointment] Response text sample:', responseText.slice(0, 1000));
-        return { slotsByDate: {}, unavailableDates: [] };
-      }
-
-      const appointmentData = buildAppointmentAvailabilityFromSlots(payload, month);
-      console.log('[Appointment] Parsed available appointment dates:', Object.keys(appointmentData.slotsByDate).length);
-      console.log('[Appointment] Parsed unavailable appointment dates:', appointmentData.unavailableDates.length);
-      return appointmentData;
-    } finally {
-      await browser.close();
-    }
-  } catch (error) {
-    console.error('[Appointment] Error:', error.message);
-    console.error('[Appointment] Stack:', error.stack);
-    return [];
-  }
-};
-
-const getCachedAppointmentAvailability = async (month, appointmentUrl) => {
-  if (!GOOGLE_APPOINTMENT_URL && !appointmentUrl) {
-    return { slotsByDate: {}, unavailableDates: [] };
-  }
-  const key = `${month}|${appointmentUrl || GOOGLE_APPOINTMENT_URL}`;
-  const cached = APPOINTMENT_AVAILABILITY_CACHE.get(key);
-
-  // If we have a fresh cache entry, return it immediately
-  if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) {
-    return cached.data;
-  }
-
-  // If we have a stale cache entry, return it immediately and refresh in background
-  if (cached) {
-    // background refresh (don't await)
-    fetchGoogleAppointmentAvailability(month, appointmentUrl)
-      .then((data) => {
-        const normalizedData = {
-          slotsByDate: data?.slotsByDate || {},
-          unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
-        };
-        APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
-        console.log('[Appointment] Background refreshed cache for', key);
-      })
-      .catch((err) => console.warn('[Appointment] Background refresh failed:', err && err.message));
-
-    return cached.data;
-  }
-
-  // No cache: kick off a background fetch and return an immediate empty/default result
-  fetchGoogleAppointmentAvailability(month, appointmentUrl)
-    .then((data) => {
-      const normalizedData = {
-        slotsByDate: data?.slotsByDate || {},
-        unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
-      };
-      APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
-      console.log('[Appointment] Primed cache for', key);
-    })
-    .catch((err) => console.warn('[Appointment] Priming cache failed:', err && err.message));
-
-  return { slotsByDate: {}, unavailableDates: [] };
-};
-
-// Periodic background scraper to proactively fetch and cache appointment availability
-const startAppointmentBackgroundScraper = (intervalMinutes = 10, monthsAhead = 2) => {
-  const run = async () => {
-    try {
-      const now = new Date();
-      for (let i = 0; i <= monthsAhead; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        const key = `${monthKey}|${GOOGLE_APPOINTMENT_URL}`;
-        console.log('[Appointment] Background fetch for', monthKey);
-        try {
-          const data = await fetchGoogleAppointmentAvailability(monthKey, GOOGLE_APPOINTMENT_URL);
-          const normalizedData = {
-            slotsByDate: data?.slotsByDate || {},
-            unavailableDates: Array.isArray(data?.unavailableDates) ? data.unavailableDates : [],
-          };
-          APPOINTMENT_AVAILABILITY_CACHE.set(key, { data: normalizedData, fetchedAt: Date.now() });
-          console.log('[Appointment] Background cached', monthKey, '→', normalizedData.unavailableDates.length, 'unavailable');
-        } catch (err) {
-          console.warn('[Appointment] Background fetch failed for', monthKey, err && err.message);
-        }
-      }
-    } catch (err) {
-      console.error('[Appointment] Background scraper error:', err && err.message);
-    }
-  };
-
-  // Run immediately, then on interval
-  run();
-  setInterval(run, intervalMinutes * 60 * 1000);
-};
-
-// Start background scraper on module load
-try {
-  startAppointmentBackgroundScraper(10, 2);
-} catch (err) {
-  console.warn('[Appointment] Failed to start background scraper:', err && err.message);
-}
-
-const filterEventsForDate = (date, events) => {
-  const dayStart = new Date(`${date}T00:00:00`);
-  const dayEnd = new Date(`${date}T23:59:59`);
-
-  return events.filter((event) => {
-    const eventStart = new Date(event.start?.dateTime || event.start?.date);
-    const eventEnd = new Date(event.end?.dateTime || event.end?.date);
-
-    if (Number.isNaN(eventStart.getTime()) || Number.isNaN(eventEnd.getTime())) {
-      return false;
-    }
-
-    return eventStart <= dayEnd && eventEnd >= dayStart;
-  });
-};
-
-const parseIcsDate = (value) => {
-  if (!value) return null;
-  if (/^\d{8}T\d{6}Z$/.test(value)) {
-    const year = value.slice(0, 4);
-    const month = value.slice(4, 6);
-    const day = value.slice(6, 8);
-    const hour = value.slice(9, 11);
-    const minute = value.slice(11, 13);
-    const second = value.slice(13, 15);
-    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
-  }
-
-  if (/^\d{8}T\d{6}$/.test(value)) {
-    const year = value.slice(0, 4);
-    const month = value.slice(4, 6);
-    const day = value.slice(6, 8);
-    const hour = value.slice(9, 11);
-    const minute = value.slice(11, 13);
-    const second = value.slice(13, 15);
-    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
-  }
-
-  if (/^\d{8}$/.test(value)) {
-    const year = value.slice(0, 4);
-    const month = value.slice(4, 6);
-    const day = value.slice(6, 8);
-    return new Date(`${year}-${month}-${day}T00:00:00`);
-  }
-
-  return null;
-};
-
-const parseIcsEvents = (icsText) => {
-  const unfoldedText = icsText.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '');
-  const lines = unfoldedText.split('\n');
-  const events = [];
-  let event = null;
-
-  lines.forEach((line) => {
-    if (line.startsWith('BEGIN:VEVENT')) {
-      event = {};
-      return;
-    }
-
-    if (line.startsWith('END:VEVENT')) {
-      if (event?.start && event?.end) {
-        events.push({
-          start: event.start,
-          end: event.end,
-        });
-      }
-      event = null;
-      return;
-    }
-
-    if (!event) return;
-
-    const [rawKey, rawValue] = line.split(':');
-    if (!rawKey || !rawValue) return;
-
-    const key = rawKey.split(';')[0];
-    if (key === 'DTSTART') {
-      const date = parseIcsDate(rawValue.trim());
-      if (date) {
-        if (/^\d{8}$/.test(rawValue.trim())) {
-          event.start = { date: date.toISOString().slice(0, 10) };
-        } else {
-          event.start = { dateTime: date.toISOString() };
-        }
-      }
-    }
-
-    if (key === 'DTEND') {
-      const date = parseIcsDate(rawValue.trim());
-      if (date) {
-        if (/^\d{8}$/.test(rawValue.trim())) {
-          event.end = { date: date.toISOString().slice(0, 10) };
-        } else {
-          event.end = { dateTime: date.toISOString() };
-        }
-      }
-    }
-
-    if (key === 'UID') {
-      event.uid = rawValue.trim();
-    }
-  });
-
-  return events;
-};
-
-const syncCalendarEventsAndBlockDeleted = async (currentEvents) => {
-  try {
-    // Get all currently cached events
-    const cachedStmt = db.prepare('SELECT event_uid, event_date, start_time, end_time FROM calendar_events_cache');
-    const cachedEvents = await cachedStmt.all();
-
-    // Build a set of current event UIDs for quick lookup
-    const currentEventUids = new Set(currentEvents.filter((e) => e.uid).map((e) => e.uid));
-
-    // Check for deleted events (were cached, but not in current events)
-    for (const cached of cachedEvents) {
-      if (cached.event_uid && !currentEventUids.has(cached.event_uid)) {
-        // This event was deleted from Google Calendar
-        // Auto-block this time slot
-        const reason = 'Auto-blocked: removed from Google Calendar';
-
-        const checkStmt = db.prepare('SELECT id FROM blocked_dates WHERE date = ?');
-        const existing = await checkStmt.get(cached.event_date);
-
-        if (!existing) {
-          const insertStmt = db.prepare(
-            'INSERT INTO blocked_dates (date, start_time, end_time, reason) VALUES (?, ?, ?, ?)',
-          );
-          await insertStmt.run(cached.event_date, cached.start_time, cached.end_time, reason);
-        }
-
-        // Remove from cache
-        const deleteStmt = db.prepare('DELETE FROM calendar_events_cache WHERE event_uid = ?');
-        await deleteStmt.run(cached.event_uid);
-      }
-    }
-
-    // Update cache with current events
-    for (const event of currentEvents) {
-      if (!event.uid) continue;
-
-      const eventRange = getLocalEventRange(event);
-      if (!eventRange) continue;
-
-      const eventDate = eventRange.startDate;
-      const startTime = eventRange.fullDay ? null : toTimeString(eventRange.startMinutes);
-      const endTime = eventRange.fullDay ? null : toTimeString(eventRange.endMinutes);
-
-      // Delete old entry if it exists
-      const deleteStmt = db.prepare('DELETE FROM calendar_events_cache WHERE event_uid = ?');
-      await deleteStmt.run(event.uid);
-
-      // Insert new entry
-      const insertStmt = db.prepare(
-        `INSERT INTO calendar_events_cache (event_uid, event_date, start_time, end_time, last_seen)
-         VALUES (?, ?, ?, ?, datetime('now'))`,
-      );
-      await insertStmt.run(event.uid, eventDate, startTime, endTime);
-    }
-  } catch (error) {
-    console.error('Calendar sync error:', error.message);
-  }
 };
 
 // Pricing
@@ -1390,29 +530,7 @@ const isSlotAvailableForBooking = async (booking_date, start_time, end_time) => 
   const existingBookingsStmt = db.prepare('SELECT start_time, end_time FROM bookings WHERE booking_date = ? AND status != ?');
   const existingBookings = await existingBookingsStmt.all(booking_date, 'cancelled');
 
-  const dayStartIso = new Date(`${booking_date}T00:00:00`).toISOString();
-  const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
-  const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-  const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-
-  const appointmentAvailability = GOOGLE_APPOINTMENT_URL
-    ? await getCachedAppointmentAvailability(booking_date.slice(0, 7))
-    : { slotsByDate: {}, unavailableDates: [] };
-
-  if (appointmentAvailability.unavailableDates.includes(booking_date)) {
-    return false;
-  }
-
-  // Check if this date is configured to ignore Google Calendar events
-  const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
-  const ignoreRows = await ignoreStmt.all(booking_date);
-  const finalCalendarEvents = ignoreRows.length ? [] : calendarEvents;
-
-  const availability = await listDateAvailability(booking_date, blockedRows, existingBookings, finalCalendarEvents);
-  const appointmentSlots = appointmentAvailability.slotsByDate[booking_date] || null;
-  if (appointmentSlots) {
-    return appointmentSlots.includes(start_time);
-  }
+  const availability = await listDateAvailability(booking_date, blockedRows, existingBookings);
   return availability.slots.includes(start_time);
 };
 
@@ -1731,23 +849,6 @@ app.post('/api/bookings', async (req, res) => {
             return res.status(400).json({ error: 'This booking overlaps an existing booking' });
           }
         }
-
-        const dayStartIso = new Date(`${booking_date}T00:00:00`).toISOString();
-        const dayEndIso = new Date(`${booking_date}T23:59:59`).toISOString();
-        const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-        const calendarEvents = filterEventsForDate(booking_date, googleEvents);
-
-        // If this date is configured to ignore Google Calendar, skip overlap checks
-        const ignoreStmt2 = db.prepare('SELECT date FROM calendar_ignores WHERE date = ?');
-        const ignoreRows2 = await ignoreStmt2.all(booking_date);
-        if (ignoreRows2.length === 0) {
-          for (const event of calendarEvents) {
-            const eventRange = getEventRangeForDate(booking_date, event);
-            if (eventRange && overlap(bookingStart, bookingEnd, eventRange.start, eventRange.end)) {
-              return res.status(400).json({ error: 'This booking overlaps a busy Google Calendar event' });
-            }
-          }
-        }
       } catch (err) {
         return res.status(500).json({ error: err.message });
       }
@@ -1964,28 +1065,10 @@ app.get('/api/availability', async (req, res) => {
     const bookingRows = await bookingsStmt.all(startDate, endDate);
 
     const activeBookingRows = bookingRows.filter((row) => row.status !== 'cancelled');
-    const dayStartIso = new Date(year, monthIndex, 1, 0, 0, 0).toISOString();
-    const dayEndIso = new Date(year, monthIndex + 1, 0, 23, 59, 59).toISOString();
-    const googleEvents = await fetchGoogleCalendarEvents(dayStartIso, dayEndIso);
-    // Support per-request override of the Google appointment URL for testing
-    OVERRIDE_GOOGLE_APPOINTMENT_URL = (req && req.query && req.query.googleAppointmentUrl) ? req.query.googleAppointmentUrl : null;
-    const appointmentAvailability = await getCachedAppointmentAvailability(month, OVERRIDE_GOOGLE_APPOINTMENT_URL);
-
-    // Sync calendar events and auto-block deleted availability slots
-    await syncCalendarEventsAndBlockDeleted(googleEvents);
-
-    // Re-fetch blocked dates after sync
-    const blockedStmtAfterSync = db.prepare('SELECT date, start_time, end_time, reason FROM blocked_dates WHERE date >= ? AND date <= ? UNION ALL SELECT date, start_time, end_time, reason FROM blocked_date_segments WHERE date >= ? AND date <= ?');
-    const blockedRowsAfterSync = await blockedStmtAfterSync.all(startDate, endDate, startDate, endDate);
-
-    // Fetch any calendar ignore rules (dates where Google Calendar should be ignored)
-    const ignoreStmt = db.prepare('SELECT date FROM calendar_ignores WHERE date >= ? AND date <= ?');
-    const ignoreRows = await ignoreStmt.all(startDate, endDate);
-    const ignoreSet = new Set(ignoreRows.map((r) => r.date));
 
     const fullDayBlockedDates = [];
     const partialBlockedSegments = [];
-    for (const row of blockedRowsAfterSync) {
+    for (const row of blockedRows) {
       if (!row.start_time && !row.end_time) {
         fullDayBlockedDates.push(row.date);
       } else if (row.start_time && row.end_time) {
@@ -2000,27 +1083,14 @@ app.get('/api/availability', async (req, res) => {
 
     const unavailableDates = [];
     const slotsByDate = {};
-    const appointmentUnavailableSet = new Set(appointmentAvailability.unavailableDates || []);
-    const appointmentSlotsByDate = appointmentAvailability.slotsByDate || {};
-    const hasAppointmentSlots = Object.keys(appointmentSlotsByDate).some((d) => Array.isArray(appointmentSlotsByDate[d]) && appointmentSlotsByDate[d].length > 0);
 
     for (let day = 1; day <= lastDay.getDate(); day += 1) {
       const date = `${yearStr}-${monthStr}-${String(day).padStart(2, '0')}`;
       const dayBookings = activeBookingRows.filter((row) => row.booking_date === date);
-      const dayEvents = ignoreSet.has(date) ? [] : filterEventsForDate(date, googleEvents);
-      const availability = await listDateAvailability(date, blockedRowsAfterSync, dayBookings, dayEvents);
+      const availability = await listDateAvailability(date, blockedRows, dayBookings);
 
-      let finalSlots = availability.slots;
-      if (hasAppointmentSlots && appointmentSlotsByDate[date]) {
-        finalSlots = availability.slots.filter((slot) => appointmentSlotsByDate[date].includes(slot));
-      }
-
-      // Only apply appointment-derived full-day blocking when the appointment page provided explicit slot data.
-      const appointmentMarkedUnavailable = hasAppointmentSlots && appointmentUnavailableSet.has(date);
-      if (appointmentMarkedUnavailable) {
-        finalSlots = [];
-      }
-      const finalIsUnavailable = appointmentMarkedUnavailable || finalSlots.length === 0;
+      const finalSlots = availability.slots;
+      const finalIsUnavailable = finalSlots.length === 0;
 
       slotsByDate[date] = finalSlots;
       if (finalIsUnavailable) {
@@ -2028,35 +1098,14 @@ app.get('/api/availability', async (req, res) => {
       }
     }
 
-    // clear override after processing
-    OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
-
     return res.json({
       month,
       unavailableDates,
       slotsByDate,
       fullDayBlockedDates,
       partialBlockedSegments,
-      appointmentUnavailableDates: appointmentAvailability.unavailableDates || [],
-      appointmentSlotsByDate: appointmentAvailability.slotsByDate || {},
-      source: {
-        googleCalendarLinked: Boolean((GOOGLE_CALENDAR_ID && (GOOGLE_API_KEY || GOOGLE_SERVICE_ACCOUNT_JSON)) || GOOGLE_CALENDAR_ICS_URL || GOOGLE_APPOINTMENT_URL),
-        authMode: GOOGLE_SERVICE_ACCOUNT_JSON
-          ? 'adc_service_account'
-          : GOOGLE_API_KEY
-          ? 'api_key'
-          : GOOGLE_CALENDAR_ICS_URL && GOOGLE_APPOINTMENT_URL
-          ? 'ics_url_and_appointment_page'
-          : GOOGLE_CALENDAR_ICS_URL
-          ? 'ics_url'
-          : GOOGLE_APPOINTMENT_URL
-          ? 'appointment_page'
-          : 'none',
-        appointmentUrl: Boolean(GOOGLE_APPOINTMENT_URL),
-      },
     });
   } catch (error) {
-    OVERRIDE_GOOGLE_APPOINTMENT_URL = null;
     return res.status(500).json({ error: error.message });
   }
 });
@@ -2112,7 +1161,6 @@ app.delete('/api/blocked-dates/:id', verifyAdminToken, async (req, res) => {
   }
 });
 
-// Add calendar ignore (ignore Google Calendar events for a specific date)
 // Basic admin auth middleware (uses ADMIN_PASSWORD env var)
 
 const getAdminPassword = () => {
@@ -2143,43 +1191,6 @@ const basicAuthMiddleware = (req, res, next) => {
 
   next();
 };
-
-// Add calendar ignore (ignore Google Calendar events for a specific date)
-app.post('/api/calendar-ignore', basicAuthMiddleware, async (req, res) => {
-  try {
-    const { date, reason } = req.body;
-    if (!date) return res.status(400).json({ error: 'Date is required' });
-
-    const stmt = db.prepare('INSERT INTO calendar_ignores (date, reason) VALUES (?, ?)');
-    const result = await stmt.run(date, reason || null);
-    res.status(201).json({ id: result.lastInsertRowid });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Remove calendar ignore for a date
-app.delete('/api/calendar-ignore/:date', basicAuthMiddleware, async (req, res) => {
-  try {
-    const { date } = req.params;
-    const del = db.prepare('DELETE FROM calendar_ignores WHERE date = ?');
-    await del.run(date);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// List calendar ignores
-app.get('/api/calendar-ignores', basicAuthMiddleware, async (req, res) => {
-  try {
-    const stmt = db.prepare('SELECT id, date, reason, created_at FROM calendar_ignores ORDER BY date');
-    const rows = await stmt.all();
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Serve admin UI without Basic Auth so the login page can be used
 // (Handled earlier by simple middleware to avoid path-to-regexp parsing)
@@ -2336,34 +1347,142 @@ app.put('/api/user/update/:username', verifyToken, async (req, res) => {
   }
 });
 
-// Diagnostic endpoint for deployments: confirm which availability sources are configured.
-app.get('/api/availability-source', (req, res) => {
-  res.json({
-    appointmentUrlConfigured: Boolean(process.env.GOOGLE_APPOINTMENT_URL),
-    appointmentUrlEffective: Boolean(GOOGLE_APPOINTMENT_URL),
-    appointmentUrlSource: process.env.GOOGLE_APPOINTMENT_URL ? 'env' : 'fallback',
-    appointmentUrl: GOOGLE_APPOINTMENT_URL,
-    icsUrlConfigured: Boolean(GOOGLE_CALENDAR_ICS_URL),
-    primaryAvailabilitySource: PRIMARY_AVAILABILITY_SOURCE,
-    authMode: GOOGLE_SERVICE_ACCOUNT_JSON
-      ? 'adc_service_account'
-      : GOOGLE_API_KEY
-      ? 'api_key'
-      : GOOGLE_CALENDAR_ICS_URL && GOOGLE_APPOINTMENT_URL
-      ? 'ics_url_and_appointment_page'
-      : GOOGLE_CALENDAR_ICS_URL
-      ? 'ics_url'
-      : GOOGLE_APPOINTMENT_URL
-      ? 'appointment_page'
-      : 'none',
-  });
+// Google Calendar ICS sync
+const parseIcsEvent = (eventText) => {
+  // Parse VEVENT to extract DTSTART, DTEND, SUMMARY
+  const dtStartMatch = eventText.match(/DTSTART(?:;TZID=[^:]+)?:([^\r\n]+)/);
+  const dtEndMatch = eventText.match(/DTEND(?:;TZID=[^:]+)?:([^\r\n]+)/);
+  const summaryMatch = eventText.match(/SUMMARY:([^\r\n]+)/);
+
+  if (!dtStartMatch || !dtEndMatch) return null;
+
+  const startStr = dtStartMatch[1].trim();
+  const endStr = dtEndMatch[1].trim();
+  const summary = summaryMatch ? summaryMatch[1].trim() : 'Blocked';
+
+  // Parse ISO 8601 format: 20260801T100000Z or 20260801T100000 or 20260801 (all-day)
+  const parseDateTime = (dateTimeStr) => {
+    const match = dateTimeStr.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/);
+    if (!match) return null;
+
+    const [, year, month, day, hour, minute] = match;
+    const date = `${year}-${month}-${day}`;
+    const time = hour && minute ? `${hour}:${minute}` : null;
+
+    return { date, time };
+  };
+
+  const start = parseDateTime(startStr);
+  const end = parseDateTime(endStr);
+
+  if (!start || !end) return null;
+
+  return {
+    startDate: start.date,
+    startTime: start.time,
+    endDate: end.date,
+    endTime: end.time,
+    summary,
+  };
+};
+
+const fetchAndSyncGoogleCalendar = async (calendarId) => {
+  try {
+    const icsUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`;
+    
+    console.log(`[SYNC] Fetching Google Calendar from: ${icsUrl}`);
+    
+    // Fetch ICS feed
+    const response = await fetch(icsUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+    }
+
+    const icsText = await response.text();
+
+    // Parse ICS events
+    const events = [];
+    const eventMatches = icsText.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+
+    for (const eventText of eventMatches) {
+      const event = parseIcsEvent(eventText);
+      if (event) {
+        events.push(event);
+      }
+    }
+
+    console.log(`[SYNC] Parsed ${events.length} events from Google Calendar`);
+
+    // Store events as blocked dates
+    let addedCount = 0;
+    const stmt = db.prepare('INSERT OR IGNORE INTO blocked_dates (date, reason, start_time, end_time) VALUES (?, ?, ?, ?)');
+
+    for (const event of events) {
+      // For same-day events, add as partial-day block
+      if (event.startDate === event.endDate && event.startTime && event.endTime) {
+        try {
+          stmt.run(event.startDate, `Google Calendar: ${event.summary}`, event.startTime, event.endTime);
+          addedCount++;
+        } catch (err) {
+          console.error(`[SYNC] Failed to insert event: ${err.message}`);
+        }
+      }
+      // For multi-day events or all-day events, add full-day blocks
+      else if (event.startDate) {
+        // Add block for start date (full day)
+        try {
+          stmt.run(event.startDate, `Google Calendar: ${event.summary}`, null, null);
+          addedCount++;
+        } catch (err) {
+          console.error(`[SYNC] Failed to insert event: ${err.message}`);
+        }
+
+        // Add blocks for intermediate days if multi-day
+        if (event.endDate && event.endDate !== event.startDate) {
+          const startDate = new Date(`${event.startDate}T00:00:00`);
+          const endDate = new Date(`${event.endDate}T00:00:00`);
+
+          for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
+            const dateStr = d.toISOString().split('T')[0];
+            if (dateStr !== event.startDate) {
+              try {
+                stmt.run(dateStr, `Google Calendar: ${event.summary}`, null, null);
+                addedCount++;
+              } catch (err) {
+                console.error(`[SYNC] Failed to insert event: ${err.message}`);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return { success: true, addedCount, totalEvents: events.length };
+  } catch (error) {
+    console.error('[SYNC] Error syncing Google Calendar:', error.message);
+    throw error;
+  }
+};
+
+// Endpoint to sync Google Calendar
+app.post('/api/sync-google-calendar', verifyAdminToken, async (req, res) => {
+  try {
+    const { calendarId } = req.body;
+
+    if (!calendarId) {
+      return res.status(400).json({ error: 'Calendar ID is required' });
+    }
+
+    const result = await fetchAndSyncGoogleCalendar(calendarId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
+
 
 // Start server
 initializeDatabase().then(() => {
-  // start periodic calendar polling (keeps Google edits synced automatically)
-  startCalendarPolling(5);
-
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
