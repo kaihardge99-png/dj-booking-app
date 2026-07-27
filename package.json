@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "DJ Practice Session Booking App for AllFriends AV",
   "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "prebuild": "npm install",
     "postinstall": "npx playwright install",
