@@ -1541,6 +1541,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       return match ? match[0] : null;
     });
 
+    const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
+
     // Convert human-friendly labels like "27, Monday, today, no available times" into ISO dates
     const parseLabelToDate = (label) => {
       if (!label) return null;
@@ -1611,6 +1613,13 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
         }
       }
     }
+    const debugPayload = {
+      monthYearText,
+      buttonCount: unavailableLabels.buttonCount,
+      unavailableLabelCount: unavailableLabels.unavailableLabels.length,
+      unavailableLabels: unavailableLabels.unavailableLabels.slice(0, 50),
+      parseFailures,
+    };
 
     // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
     if (blockedDates.size === 0 && /no times available|no availability/i.test(globals.text || '')) {
@@ -1649,7 +1658,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       console.error('[APPT_SYNC] cleanup error', err && err.message);
     }
 
-    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates), parseFailures };
+    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates), parseFailures, debugPayload };
   } catch (error) {
     console.error('[APPT_SYNC] Error scraping appointment page:', error && error.message);
     return { success: false, error: error && error.message };
