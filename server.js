@@ -1526,19 +1526,19 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     });
 
     const monthYearText = await page.evaluate(() => {
-      const header = document.querySelector('div[role="heading"]') || document.querySelector('div[jsname="EK1Aod"]') || document.querySelector('.mUIrbf-TI6wPd-Bz112c');
-      return header ? header.innerText : null;
+      const bodyText = document.body.innerText || '';
+      const match = bodyText.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/);
+      return match ? match[0] : null;
     });
 
     // Convert human-friendly labels like "27, Monday, today, no available times" into ISO dates
     const parseLabelToDate = (label) => {
       if (!label) return null;
-      const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no availability|unavailable|not available/gi, '').trim();
+      const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no available slots|no availability|unavailable|not available/gi, '').trim();
       const parts = cleaned.split(',').map((part) => part.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        const dayPart = parts[0];
-        const monthYearPart = parts.length >= 3 ? `${parts[1]} ${parts[2]}` : monthYearText;
-        const candidate = `${dayPart} ${monthYearPart}`;
+
+      const monthNamePattern = /(January|February|March|April|May|June|July|August|September|October|November|December)/i;
+      const tryParse = (candidate) => {
         const d = new Date(candidate);
         if (!isNaN(d.getTime())) {
           const yyyy = d.getFullYear();
@@ -1546,14 +1546,36 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           const dd = String(d.getDate()).padStart(2, '0');
           return `${yyyy}-${mm}-${dd}`;
         }
+        return null;
+      };
+
+      if (parts.length > 0) {
+        const first = parts[0];
+        if (monthNamePattern.test(first)) {
+          const candidate = parts.join(', ');
+          const parsed = tryParse(candidate);
+          if (parsed) return parsed;
+        }
+
+        if (parts.length >= 2 && monthNamePattern.test(parts[1])) {
+          const candidate = `${first} ${parts[1]}`;
+          const parsed = tryParse(candidate);
+          if (parsed) return parsed;
+        }
+
+        if (monthYearText) {
+          const numericDay = first.match(/^(\d{1,2})$/);
+          if (numericDay) {
+            const candidate = `${numericDay[1]} ${monthYearText}`;
+            const parsed = tryParse(candidate);
+            if (parsed) return parsed;
+          }
+        }
       }
-      const d = new Date(label);
-      if (!isNaN(d.getTime())) {
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`;
-      }
+
+      const parsedDirect = tryParse(label);
+      if (parsedDirect) return parsedDirect;
+
       return null;
     };
 
@@ -1605,6 +1627,8 @@ app.post('/api/sync-appointment-page', verifyAdminToken, async (req, res) => {
 
 
 // Start server
+module.exports = { fetchAndSyncAppointmentPage };
+
 initializeDatabase().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
