@@ -379,7 +379,7 @@ transporter.verify((err) => {
   }
 });
 
-const ADMIN_EMAILS = ['allfriendsavhire@gmail.com', 'kaihardge@gmail.com'];
+const ADMIN_EMAILS = ['allfriendsavhire@gmail.com'];
 
 // Operating hours
 const OPERATING_HOURS = {
