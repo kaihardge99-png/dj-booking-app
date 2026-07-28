@@ -1593,11 +1593,23 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       // Collect the labels after waiting
       nextMonthData = await collectUnavailableLabels();
       nextMonthText = await getMonthYearText();
+      
+      // Log August debug info
+      console.error(`[DEBUG AUGUST] Month text: ${nextMonthText}`);
+      console.error(`[DEBUG AUGUST] Grid cells found: ${nextMonthData.gridCellCount}`);
+      console.error(`[DEBUG AUGUST] Unavailable count: ${nextMonthData.unavailableLabels.length}`);
+      if (nextMonthData.unavailableLabels.length <= 15) {
+        console.error(`[DEBUG AUGUST] Unavailable labels: ${JSON.stringify(nextMonthData.unavailableLabels)}`);
+      } else {
+        console.error(`[DEBUG AUGUST] Sample labels (first 10): ${JSON.stringify(nextMonthData.unavailableLabels.slice(0, 10))}`);
+      }
     }
 
+    // Don't deduplicate with Set - just concatenate
+    // Set deduplication is losing data because labels might be identical across pages
     const unavailableLabels = {
-      allLabels: Array.from(new Set([...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])])),
-      unavailableLabels: Array.from(new Set([...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])])),
+      allLabels: [...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])],
+      unavailableLabels: [...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])],
       buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
     };
     
