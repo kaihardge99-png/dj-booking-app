@@ -1579,16 +1579,29 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const initialMonthYearText = await getMonthYearText();
     const initialPageData = await collectUnavailableLabels();
 
-    // Don't navigate to next month - the initial page shows July 26-31 + August 1-8
-    // All unavailable dates from both months are visible on the initial load
+    let nextMonthData = null;
+    let nextMonthText = null;
+    const nextMonthButton = await page.$('button[aria-label="Next month"]');
+    if (nextMonthButton) {
+      await nextMonthButton.click();
+      // Wait for the DOM to update with new month
+      await page.waitForTimeout(10000);
+      // Wait for networkidle
+      await page.waitForLoadState('networkidle').catch(() => null);
+      // Extra wait for rendering
+      await page.waitForTimeout(5000);
+      // Collect the labels after waiting
+      nextMonthData = await collectUnavailableLabels();
+      nextMonthText = await getMonthYearText();
+    }
+
     const unavailableLabels = {
-      allLabels: initialPageData.allLabels || [],
-      unavailableLabels: initialPageData.unavailableLabels || [],
-      buttonCount: initialPageData.buttonCount || 0,
+      allLabels: Array.from(new Set([...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])])),
+      unavailableLabels: Array.from(new Set([...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])])),
+      buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
     };
     
-    // For month year, note this is just what's prominently displayed
-    const monthYearText = initialMonthYearText || 'July 2026';
+    const monthYearText = initialMonthYearText ? (nextMonthText ? `${initialMonthYearText}, ${nextMonthText}` : initialMonthYearText) : nextMonthText;
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
@@ -1613,8 +1626,9 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       if (explicitMonthMatch) {
         const monthName = explicitMonthMatch[1];
         const day = explicitMonthMatch[2];
-        const yearCandidate = currentMonthYearText ? currentMonthYearText.split(' ')[1] : new Date().getFullYear();
-        const year = yearCandidate || new Date().getFullYear();
+        // Extract year from monthYearText - it should be the 4-digit year
+        const yearMatch = currentMonthYearText ? currentMonthYearText.match(/(\d{4})/) : null;
+        const year = yearMatch ? yearMatch[1] : new Date().getFullYear();
         const candidate = `${monthName} ${day} ${year}`;
         const parsed = tryParse(candidate);
         if (parsed) return parsed;
@@ -1653,10 +1667,20 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const blockedDates = new Set();
     const parseFailures = [];
     
-    // Parse all unavailable labels, using the main month for numeric-only labels
+    // Parse all unavailable labels
+    // For numeric-only labels (like "2, Sunday"), we need to guess the month
+    // Strategy: if day is > 25, it's probably from the same month as displayed
+    // Otherwise, check both months and use context clues
     if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
       for (const lab of unavailableLabels.unavailableLabels) {
-        const iso = parseLabelToDate(lab, monthYearText);
+        // First try to parse with the combined month text
+        let iso = parseLabelToDate(lab, monthYearText);
+        
+        // If that didn't work and we have August data, try parsing as August
+        if (!iso && nextMonthText && monthYearText.includes('August')) {
+          iso = parseLabelToDate(lab, nextMonthText);
+        }
+        
         if (iso) {
           blockedDates.add(iso);
         } else {
