@@ -142,26 +142,10 @@ function AdminDashboard({ onBlockedDatesUpdate, adminToken }) {
     setApptSyncing(true);
     setApptSyncMessage('');
     try {
-      const response = await fetch('/api/sync-appointment-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ url: appointmentUrl }),
-      });
-      if (response.ok) {
-        const r = await response.json();
-        if (r.success) {
-          setApptSyncMessage(`✓ Scraped: added ${r.addedCount} blocked dates`);
-          fetchBlockedDates();
-        } else {
-          setApptSyncMessage(r.error || 'No dates detected');
-        }
-      } else {
-        const data = await response.json();
-        setApptSyncMessage(data.error || 'Error scraping appointment page');
-      }
+      setApptSyncMessage('Appointment page sync is disabled for now.');
     } catch (err) {
-      console.error('Error scraping appointment page:', err);
-      setApptSyncMessage('Error scraping appointment page');
+      console.error('Error handling appointment page sync:', err);
+      setApptSyncMessage('Unable to update appointment sync state');
     } finally {
       setApptSyncing(false);
       setTimeout(() => setApptSyncMessage(''), 5000);

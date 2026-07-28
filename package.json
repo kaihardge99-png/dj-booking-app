@@ -8,7 +8,7 @@
   },
   "scripts": {
     "prebuild": "npm install",
-    "postinstall": "npx playwright install",
+    "postinstall": "echo 'Playwright install skipped; appointment sync is disabled'",
     "build": "esbuild src/index.js --bundle --outfile=public/bundle.js --loader:.js=jsx --platform=browser",
     "start": "node server.js",
     "dev": "node server.js"
