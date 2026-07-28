@@ -1579,54 +1579,16 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const initialMonthYearText = await getMonthYearText();
     const initialPageData = await collectUnavailableLabels();
 
-    let nextMonthData = null;
-    let nextMonthText = null;
-    const nextMonthButton = await page.$('button[aria-label="Next month"]');
-    if (nextMonthButton) {
-      await nextMonthButton.click();
-      // Wait much longer for August page to fully load
-      await page.waitForTimeout(15000);
-      await page.waitForLoadState('networkidle').catch(() => null);
-      await page.waitForTimeout(5000);
-      // Verify grid cells are loaded
-      await page.waitForFunction(
-        () => {
-          const gridCells = document.querySelectorAll('button[aria-label][data-grid-cell="true"]');
-          const gridLabels = Array.from(gridCells).map(b => b.getAttribute('aria-label') || '');
-          const augustLabels = gridLabels.filter(l => /August|[0-9]+,/.test(l));
-          // Make sure we have a good number of August labels
-          return augustLabels.length > 25;
-        },
-        { timeout: 45000 }
-      ).catch(() => null);
-      nextMonthData = await collectUnavailableLabels();
-      nextMonthText = await getMonthYearText();
-    }
-
-    const pageData = [
-      {
-        monthYearText: initialMonthYearText,
-        unavailableLabels: initialPageData.unavailableLabels,
-        allLabels: initialPageData.allLabels,
-        buttonCount: initialPageData.buttonCount,
-      },
-    ];
-    if (nextMonthData) {
-      pageData.push({
-        monthYearText: nextMonthText,
-        unavailableLabels: nextMonthData.unavailableLabels,
-        allLabels: nextMonthData.allLabels,
-        buttonCount: nextMonthData.buttonCount,
-      });
-    }
-
+    // Don't navigate to next month - the initial page shows July 26-31 + August 1-8
+    // All unavailable dates from both months are visible on the initial load
     const unavailableLabels = {
-      allLabels: Array.from(new Set([...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])])),
-      unavailableLabels: Array.from(new Set([...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])])),
-      buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
+      allLabels: initialPageData.allLabels || [],
+      unavailableLabels: initialPageData.unavailableLabels || [],
+      buttonCount: initialPageData.buttonCount || 0,
     };
-
-    const monthYearText = pageData.map((p) => p.monthYearText).filter(Boolean).join(', ');
+    
+    // For month year, note this is just what's prominently displayed
+    const monthYearText = initialMonthYearText || 'July 2026';
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
@@ -1699,32 +1661,25 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
 
     const blockedDates = new Set();
     const parseFailures = [];
-    if (pageData.length > 0) {
-      for (const page of pageData) {
-        if (Array.isArray(page.unavailableLabels) && page.unavailableLabels.length) {
-          for (const lab of page.unavailableLabels) {
-            const iso = parseLabelToDate(lab, page.monthYearText);
-            if (iso) {
-              blockedDates.add(iso);
-            } else {
-              parseFailures.push(lab);
-            }
-          }
+    
+    // Parse all unavailable labels, using the main month for numeric-only labels
+    if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
+      for (const lab of unavailableLabels.unavailableLabels) {
+        const iso = parseLabelToDate(lab, monthYearText);
+        if (iso) {
+          blockedDates.add(iso);
+        } else {
+          parseFailures.push(lab);
         }
       }
     }
+    
     const debugPayload = {
       monthYearText,
       buttonCount: unavailableLabels.buttonCount,
       unavailableLabelCount: unavailableLabels.unavailableLabels.length,
       unavailableLabels: unavailableLabels.unavailableLabels.slice(0, 50),
       parseFailures,
-      augustPageData: augustPageData ? {
-        monthYearText: augustPageData.monthYearText,
-        gridCellCount: augustPageData.gridCellCount,
-        unavailableCount: augustPageData.unavailableLabels?.length,
-        unavailableLabels: augustPageData.unavailableLabels?.slice(0, 20),
-      } : null,
     };
 
     // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
