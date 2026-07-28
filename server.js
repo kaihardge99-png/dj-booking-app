@@ -1533,6 +1533,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
         // Only collect labels from actual grid cells (calendar days), not from time slot buttons
         const gridCells = Array.from(document.querySelectorAll('button[aria-label][data-grid-cell="true"]'));
         const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
+        const allGridLabels = gridCells.map(b => b.getAttribute('aria-label'));
+        
         gridCells.forEach((button) => {
           const aria = button.getAttribute('aria-label');
           if (!aria) return;
@@ -1541,8 +1543,10 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
             labels.add(aria);
           }
         });
+        
         return {
           allLabels: gridCells.slice(0, 200).map((button) => button.getAttribute('aria-label')),
+          allGridLabelsDebug: allGridLabels,  // Debug: all grid labels
           unavailableLabels: Array.from(labels),
           buttonCount: allButtons.length,
           gridCellCount: gridCells.length,
