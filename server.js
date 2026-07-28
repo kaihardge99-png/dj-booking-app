@@ -1544,18 +1544,22 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           }
         });
         
+        // Count by pattern to debug
+        const augustLabels = allGridLabels.filter(l => l && (l.includes('August') || l.match(/^[1-9]\d{0,1},\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/)));
+        const julyLabels = allGridLabels.filter(l => l && l.includes('July'));
+        const juneLabels = allGridLabels.filter(l => l && l.includes('June'));
+        
         return {
           allLabels: gridCells.slice(0, 200).map((button) => button.getAttribute('aria-label')),
           allGridLabelsDebug: allGridLabels,  // Debug: all grid labels
           unavailableLabels: Array.from(labels),
           buttonCount: allButtons.length,
           gridCellCount: gridCells.length,
-          // NEW DEBUG: show first 5 unavailable labels with indices
-          unavailableSample: Array.from(labels).slice(0, 5),
-          // NEW DEBUG: check day-of-week for August 1, 2 to verify month
-          dayOfWeekCheck: {
-            august1: allGridLabels.find(l => l?.match(/^1,.*Saturday/)) ? 'Aug1-Saturday-OK' : 'Aug1-NOT-Saturday',
-            august2: allGridLabels.find(l => l?.match(/^2,.*Sunday/)) ? 'Aug2-Sunday-OK' : 'Aug2-NOT-Sunday',
+          monthBreakdown: {
+            juneCount: juneLabels.length,
+            julyCount: julyLabels.length,
+            augustCount: augustLabels.length,
+            augustSample: augustLabels.slice(0, 5),
           },
         };
       });
@@ -1605,6 +1609,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       console.error(`[DEBUG AUGUST] Month text: ${nextMonthText}`);
       console.error(`[DEBUG AUGUST] Grid cells found: ${nextMonthData.gridCellCount}`);
       console.error(`[DEBUG AUGUST] Unavailable count: ${nextMonthData.unavailableLabels.length}`);
+      console.error(`[DEBUG AUGUST] ALL grid labels (showing day 1-3):`, JSON.stringify(nextMonthData.allGridLabelsDebug?.filter(l => /^[1-3],/.test(l) || l?.includes('August [1-3]'))));
       if (nextMonthData.unavailableLabels.length <= 15) {
         console.error(`[DEBUG AUGUST] Unavailable labels: ${JSON.stringify(nextMonthData.unavailableLabels)}`);
       } else {
@@ -1618,6 +1623,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       allLabels: [...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])],
       unavailableLabels: [...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])],
       buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
+      monthBreakdown: nextMonthData?.monthBreakdown,  // Use next month breakdown since that's where the issue is
     };
     
     const monthYearText = initialMonthYearText ? (nextMonthText ? `${initialMonthYearText}, ${nextMonthText}` : initialMonthYearText) : nextMonthText;
@@ -1714,6 +1720,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       unavailableLabelCount: unavailableLabels.unavailableLabels.length,
       unavailableLabels: unavailableLabels.unavailableLabels.slice(0, 50),
       parseFailures,
+      monthBreakdown: unavailableLabels.monthBreakdown,
+      augustSample: unavailableLabels.monthBreakdown?.augustSample,
     };
 
     // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
@@ -1753,7 +1761,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       console.error('[APPT_SYNC] cleanup error', err && err.message);
     }
 
-    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates), parseFailures, debugPayload };
+    return { success: true, addedCount: added, removedCount: removed, detected: Array.from(blockedDates), parseFailures, debugPayload, monthBreakdown: unavailableLabels.monthBreakdown };
   } catch (error) {
     console.error('[APPT_SYNC] Error scraping appointment page:', error && error.message);
     return { success: false, error: error && error.message };
