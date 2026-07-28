@@ -1600,25 +1600,39 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const nextMonthButton = await page.$('button[aria-label="Next month"]');
     if (nextMonthButton) {
       await nextMonthButton.click();
-      // Extended waits to ensure all August grid labels render
-      await page.waitForTimeout(3000);
+      // Extended waits after month change - Google Calendar lazy-loads content
+      await page.waitForTimeout(5000);
       await page.waitForLoadState('networkidle').catch(() => null);
+      await page.waitForTimeout(5000);
+      
+      // Try to trigger loading of all grid labels by simulating viewport scroll/interaction
+      // This may prompt lazy-loaded labels to render
+      await page.evaluate(() => {
+        const container = document.querySelector('[role="grid"]') || document.querySelector('[role="presentation"]');
+        if (container) {
+          container.scrollTop = 0;
+          container.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+      }).catch(() => null);
+      
       await page.waitForTimeout(3000);
-      // Wait specifically for the August unavailable labels to appear
+      
+      // Wait for grid cells to fully populate with labels
       await page.waitForFunction(
         () => {
           const gridCells = document.querySelectorAll('button[aria-label][data-grid-cell="true"]');
-          const augustNoAvail = Array.from(gridCells).filter(btn => {
-            const label = btn.getAttribute('aria-label') || '';
-            return label.toLowerCase().includes('no available') && 
-                   (label.match(/^\d{1,2},\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/) || label.includes('August'));
+          // Check that we have enough grid cells and most have aria-labels
+          if (gridCells.length < 30) return false;
+          const withLabels = Array.from(gridCells).filter(btn => {
+            const label = btn.getAttribute('aria-label');
+            return label && label.length > 5;  // Real labels are longer than 5 chars
           });
-          // Wait for at least 8 August "no available times" labels to be present
-          return augustNoAvail.length >= 8;
+          return withLabels.length > 20;  // Most cells should have detailed labels
         },
-        { timeout: 30000 }
+        { timeout: 20000 }
       ).catch(() => null);
-      await page.waitForTimeout(2000);  // Extra 2s to be safe
+      
+      await page.waitForTimeout(2000);
       // Collect the labels after waiting
       nextMonthData = await collectUnavailableLabels();
       nextMonthText = await getMonthYearText();
