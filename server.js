@@ -1600,12 +1600,25 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const nextMonthButton = await page.$('button[aria-label="Next month"]');
     if (nextMonthButton) {
       await nextMonthButton.click();
-      // Wait for the DOM to update with new month
-      await page.waitForTimeout(10000);
-      // Wait for networkidle
+      // Extended waits to ensure all August grid labels render
+      await page.waitForTimeout(3000);
       await page.waitForLoadState('networkidle').catch(() => null);
-      // Extra wait for rendering
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(3000);
+      // Wait specifically for the August unavailable labels to appear
+      await page.waitForFunction(
+        () => {
+          const gridCells = document.querySelectorAll('button[aria-label][data-grid-cell="true"]');
+          const augustNoAvail = Array.from(gridCells).filter(btn => {
+            const label = btn.getAttribute('aria-label') || '';
+            return label.toLowerCase().includes('no available') && 
+                   (label.match(/^\d{1,2},\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/) || label.includes('August'));
+          });
+          // Wait for at least 8 August "no available times" labels to be present
+          return augustNoAvail.length >= 8;
+        },
+        { timeout: 30000 }
+      ).catch(() => null);
+      await page.waitForTimeout(2000);  // Extra 2s to be safe
       // Collect the labels after waiting
       nextMonthData = await collectUnavailableLabels();
       nextMonthText = await getMonthYearText();
