@@ -1589,6 +1589,11 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
 
     const initialMonthYearText = await getMonthYearText();
     const initialPageData = await collectUnavailableLabels();
+    
+    console.error(`[DEBUG JULY] Month text: ${initialMonthYearText}`);
+    console.error(`[DEBUG JULY] Grid cells found: ${initialPageData.gridCellCount}`);
+    console.error(`[DEBUG JULY] Unavailable count: ${initialPageData.unavailableLabels.length}`);
+    console.error(`[DEBUG JULY] Month breakdown:`, JSON.stringify(initialPageData.monthBreakdown));
 
     let nextMonthData = null;
     let nextMonthText = null;
@@ -1722,6 +1727,8 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       parseFailures,
       monthBreakdown: unavailableLabels.monthBreakdown,
       augustSample: unavailableLabels.monthBreakdown?.augustSample,
+      initialPageBreakdown: initialPageData?.monthBreakdown,
+      nextPageBreakdown: nextMonthData?.monthBreakdown,
     };
 
     // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
