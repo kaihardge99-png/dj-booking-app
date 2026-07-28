@@ -7,6 +7,8 @@ const Database = require('better-sqlite3');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const { buildGoogleCalendarLink } = require('./src/googleCalendarLink');
+const { findUserByIdentifier } = require('./src/userAuth');
 require('dotenv').config();
 
 const app = express();
@@ -576,9 +578,8 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Find user by username or email
-    const stmt = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?');
-    const user = await stmt.get(identifier, identifier);
+    // Find user by username or email using a case-insensitive lookup
+    const user = await findUserByIdentifier(db, identifier);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid username, email or password' });
@@ -608,9 +609,8 @@ app.post('/api/forgot-password', async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
 
-    // Find user by email
-    const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
-    const user = await stmt.get(email);
+    // Find user by email using a case-insensitive lookup
+    const user = await findUserByIdentifier(db, email);
 
     if (!user) {
       // Don't reveal if email exists for security
@@ -933,29 +933,48 @@ app.post('/api/bookings', async (req, res) => {
       }
     });
 
+    const adminCalendarLink = buildGoogleCalendarLink({
+      title: `DJ Practice Session - ${user_name}`,
+      startDate: booking_date,
+      startTime: start_time,
+      endDate: booking_date,
+      endTime: end_time,
+      location: 'AllFriends AV',
+      description: `Booking for ${user_name} (${user_email})\nPhone: ${user_phone}\nPackage: ${package_type === 'package1' ? 'Standard ($50/hr)' : 'Premium ($100/hr)'}\nNotes: ${notes || 'None'}`,
+      timezone: APP_TIMEZONE,
+      calendarId: process.env.GOOGLE_CALENDAR_ID || 'allfriendsavhire@gmail.com',
+    });
+
     // Send notification to admins
     const adminMailOptions = {
       from: process.env.EMAIL_USER,
       to: ADMIN_EMAILS.join(','),
       subject: 'New Booking - AllFriends AV DJ Practice Sessions',
       html: `
-        <h2>New Booking Received</h2>
-        <p><strong>Customer Details:</strong></p>
-        <ul>
-          <li>Name: ${user_name}</li>
-          <li>Email: ${user_email}</li>
-          <li>Phone: ${user_phone}</li>
-        </ul>
-        <p><strong>Booking Details:</strong></p>
-        <ul>
-          <li>Date: ${booking_date}</li>
-          <li>Time: ${start_time} - ${end_time}</li>
-          <li>Duration: ${duration_hours} hours</li>
-          <li>Package: ${package_type === 'package1' ? 'Standard ($50/hr)' : 'Premium ($100/hr)'}</li>
-          <li>Total Price: $${total_price}</li>
-          <li>Notes: ${notes || 'None'}</li>
-        </ul>
-        <p><a href="${FRONTEND_URL}">View in Admin Dashboard</a></p>
+        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+          <h2 style="margin-bottom: 12px;">New Booking Received</h2>
+          <p><strong>Customer Details:</strong></p>
+          <ul>
+            <li>Name: ${user_name}</li>
+            <li>Email: ${user_email}</li>
+            <li>Phone: ${user_phone}</li>
+          </ul>
+          <p><strong>Booking Details:</strong></p>
+          <ul>
+            <li>Date: ${booking_date}</li>
+            <li>Time: ${start_time} - ${end_time}</li>
+            <li>Duration: ${duration_hours} hours</li>
+            <li>Package: ${package_type === 'package1' ? 'Standard ($50/hr)' : 'Premium ($100/hr)'}</li>
+            <li>Total Price: $${total_price}</li>
+            <li>Notes: ${notes || 'None'}</li>
+          </ul>
+          <p style="margin: 20px 0;">
+            <a href="${adminCalendarLink}" style="display: inline-block; background: #4285f4; color: white; padding: 12px 18px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+              Add to Google Calendar
+            </a>
+          </p>
+          <p><a href="${FRONTEND_URL}">View in Admin Dashboard</a></p>
+        </div>
       `,
     };
 
@@ -1484,28 +1503,8 @@ app.post('/api/sync-google-calendar', verifyAdminToken, async (req, res) => {
   }
 });
 
-// Appointment page sync is temporarily disabled while we switch to a different approach.
-const fetchAndSyncAppointmentPage = async () => {
-  return {
-    success: false,
-    disabled: true,
-    message: 'Appointment page sync is disabled for now.',
-  };
-};
-
-// Endpoint to sync appointment page via headless browser
-app.post('/api/sync-appointment-page', verifyAdminToken, async (req, res) => {
-  try {
-    const result = await fetchAndSyncAppointmentPage();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-
 // Start server
-module.exports = { fetchAndSyncAppointmentPage };
+module.exports = {};
 
 initializeDatabase().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
