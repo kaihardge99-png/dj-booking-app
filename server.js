@@ -1736,13 +1736,16 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       if (explicitMonthMatch) {
         const monthName = explicitMonthMatch[1];
         const day = explicitMonthMatch[2];
-        // Extract year from monthYearText - it should be the 4-digit year
         const yearMatch = currentMonthYearText ? currentMonthYearText.match(/(\d{4})/) : null;
         const year = yearMatch ? yearMatch[1] : new Date().getFullYear();
         const candidate = `${monthName} ${day} ${year}`;
         const parsed = tryParse(candidate);
         if (parsed) return parsed;
       }
+
+      const monthContextMatch = currentMonthYearText ? currentMonthYearText.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i) : null;
+      const monthName = monthContextMatch ? monthContextMatch[1] : null;
+      const year = monthContextMatch ? monthContextMatch[2] : null;
 
       if (parts.length > 0) {
         const first = parts[0];
@@ -1758,10 +1761,10 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           if (parsed) return parsed;
         }
 
-        if (currentMonthYearText) {
+        if (monthName && year) {
           const numericDay = first.match(/^(\d{1,2})$/);
           if (numericDay) {
-            const candidate = `${numericDay[1]} ${currentMonthYearText}`;
+            const candidate = `${monthName} ${numericDay[1]} ${year}`;
             const parsed = tryParse(candidate);
             if (parsed) return parsed;
           }
@@ -1777,20 +1780,23 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const blockedDates = new Set();
     const parseFailures = [];
     
-    // Parse all unavailable labels
-    // For numeric-only labels (like "2, Sunday"), we need to guess the month
-    // Strategy: if day is > 25, it's probably from the same month as displayed
-    // Otherwise, check both months and use context clues
-    if (Array.isArray(unavailableLabels.unavailableLabels) && unavailableLabels.unavailableLabels.length) {
-      for (const lab of unavailableLabels.unavailableLabels) {
-        // First try to parse with the combined month text
-        let iso = parseLabelToDate(lab, monthYearText);
-        
-        // If that didn't work and we have August data, try parsing as August
-        if (!iso && nextMonthText && monthYearText.includes('August')) {
-          iso = parseLabelToDate(lab, nextMonthText);
+    const julyContext = initialMonthYearText || 'July 2026';
+    const augustContext = nextMonthText || initialMonthYearText || 'August 2026';
+
+    if (Array.isArray(julyUnavailable) && julyUnavailable.length) {
+      for (const lab of julyUnavailable) {
+        const iso = parseLabelToDate(lab, julyContext);
+        if (iso) {
+          blockedDates.add(iso);
+        } else {
+          parseFailures.push(lab);
         }
-        
+      }
+    }
+
+    if (Array.isArray(augustUnavailable) && augustUnavailable.length) {
+      for (const lab of augustUnavailable) {
+        const iso = parseLabelToDate(lab, augustContext);
         if (iso) {
           blockedDates.add(iso);
         } else {
