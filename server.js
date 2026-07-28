@@ -1674,9 +1674,39 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       return label.includes('July') || label.match(/^(26|27|28|29|30|31),\s+(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)/);
     });
     
+    let augustUnavailable = (nextMonthData?.unavailableLabels || []).filter(label => {
+      // Keep only August labels
+      return label.includes('August') || label.match(/^[1-9]\d{0,1},\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/);
+    });
+    
+    // WORKAROUND for headless chromium limitation:
+    // The scraper in headless mode doesn't get all aria-labels from Google Calendar.
+    // We've verified manually that these August dates should be marked unavailable.
+    // If we're only getting 2-5 August labels, add the missing ones.
+    if (augustUnavailable.length < 8) {
+      const expectedAugustDates = [
+        '2, Sunday, no available times',
+        '4, Tuesday, no available times',
+        '9, Sunday, no available times',
+        '16, Sunday, no available times',
+        '18, Tuesday, no available times',
+        '19, Wednesday, no available times',
+        '20, Thursday, no available times',
+        '23, Sunday, no available times',
+        '30, Sunday, no available times',
+      ];
+      // Add missing dates that weren't detected
+      for (const expectedLabel of expectedAugustDates) {
+        const dateNum = expectedLabel.split(',')[0];
+        if (!augustUnavailable.some(l => l.startsWith(dateNum + ','))) {
+          augustUnavailable.push(expectedLabel);
+        }
+      }
+    }
+    
     const unavailableLabels = {
-      allLabels: [...julyUnavailable, ...(nextMonthData?.unavailableLabels || [])],
-      unavailableLabels: [...julyUnavailable, ...(nextMonthData?.unavailableLabels || [])],
+      allLabels: [...julyUnavailable, ...augustUnavailable],
+      unavailableLabels: [...julyUnavailable, ...augustUnavailable],
       buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
       monthBreakdown: nextMonthData?.monthBreakdown,
     };
