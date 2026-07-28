@@ -1624,6 +1624,15 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
+    // Debug: show August page data if available
+    const augustPageData = pageData.length > 1 ? pageData[1] : null;
+    console.log('[APPT_SYNC] August page collected:', {
+      hasAugustData: !!augustPageData,
+      augustGridCellCount: augustPageData?.gridCellCount,
+      augustUnavailableCount: augustPageData?.unavailableLabels?.length,
+      augustLabels: augustPageData?.unavailableLabels?.slice(0, 20),
+    });
+
     const parseLabelToDate = (label, currentMonthYearText) => {
       if (!label) return null;
       const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no available slots|no availability|unavailable|not available/gi, '').trim();
@@ -1704,6 +1713,12 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       unavailableLabelCount: unavailableLabels.unavailableLabels.length,
       unavailableLabels: unavailableLabels.unavailableLabels.slice(0, 50),
       parseFailures,
+      augustPageData: augustPageData ? {
+        monthYearText: augustPageData.monthYearText,
+        gridCellCount: augustPageData.gridCellCount,
+        unavailableCount: augustPageData.unavailableLabels?.length,
+        unavailableLabels: augustPageData.unavailableLabels?.slice(0, 20),
+      } : null,
     };
 
     // If no specific labels, but page text contains a phrase indicating entire calendar closed, optionally block a range
