@@ -1622,13 +1622,20 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       }
     }
 
-    // IMPORTANT: Only use the next month data for unavailable labels!
-    // The initial July page shows incorrect August dates (wrong year/month context)
-    // Only the August page (after clicking Next) shows correct dates
+    // CRITICAL FIX: The initial page mixes July + incorrect August (from wrong calendar context)
+    // The next page correctly shows real August only
+    // Solution: Keep July data from initial page, but discard initial August data
+    // and use only the correct August data from the next page
+    
+    const julyUnavailable = (initialPageData?.unavailableLabels || []).filter(label => {
+      // Keep only labels that are clearly July or have July in them
+      return label.includes('July') || label.match(/^(26|27|28|29|30|31),\s+(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)/);
+    });
+    
     const unavailableLabels = {
-      allLabels: nextMonthData?.allLabels || [],
-      unavailableLabels: nextMonthData?.unavailableLabels || [],
-      buttonCount: nextMonthData?.buttonCount || 0,
+      allLabels: [...julyUnavailable, ...(nextMonthData?.unavailableLabels || [])],
+      unavailableLabels: [...julyUnavailable, ...(nextMonthData?.unavailableLabels || [])],
+      buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
       monthBreakdown: nextMonthData?.monthBreakdown,
     };
     
