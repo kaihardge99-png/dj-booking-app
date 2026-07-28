@@ -1605,19 +1605,22 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       await page.waitForLoadState('networkidle').catch(() => null);
       await page.waitForTimeout(5000);
       
-      // Try hovering over grid cells to trigger aria-label updates
-      // Google Calendar might only compute labels on hover
-      await page.evaluate(() => {
-        const cells = Array.from(document.querySelectorAll('button[data-grid-cell="true"]'));
-        // Hover over first and last cell to trigger rendering
-        if (cells.length > 0) {
-          cells[0].dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-          cells[Math.floor(cells.length / 2)].dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-          cells[cells.length - 1].dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      // Use Playwright hover to trigger aria-label computation
+      try {
+        const gridCells = await page.$$('button[data-grid-cell="true"]');
+        // Hover over cells distributed across the grid
+        const indicesToHover = [0, Math.floor(gridCells.length / 4), Math.floor(gridCells.length / 2), Math.floor(gridCells.length * 3 / 4), gridCells.length - 1];
+        for (const idx of indicesToHover) {
+          if (gridCells[idx]) {
+            await gridCells[idx].hover().catch(() => null);
+            await page.waitForTimeout(200);
+          }
         }
-      }).catch(() => null);
+      } catch (e) {
+        console.error('[DEBUG] Hover error:', e?.message);
+      }
       
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(2000);
       // Collect the labels after waiting
       nextMonthData = await collectUnavailableLabels();
       nextMonthText = await getMonthYearText();
