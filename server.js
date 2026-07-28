@@ -1527,7 +1527,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       };
     });
 
-    const collectUnavailableLabels = async () => {
+    async function collectUnavailableLabels() {
       return await page.evaluate(() => {
         const labels = new Set();
         // Only collect labels from actual grid cells (calendar days), not from time slot buttons
@@ -1550,6 +1550,13 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
           unavailableLabels: Array.from(labels),
           buttonCount: allButtons.length,
           gridCellCount: gridCells.length,
+          // NEW DEBUG: show first 5 unavailable labels with indices
+          unavailableSample: Array.from(labels).slice(0, 5),
+          // NEW DEBUG: check day-of-week for August 1, 2 to verify month
+          dayOfWeekCheck: {
+            august1: allGridLabels.find(l => l?.match(/^1,.*Saturday/)) ? 'Aug1-Saturday-OK' : 'Aug1-NOT-Saturday',
+            august2: allGridLabels.find(l => l?.match(/^2,.*Sunday/)) ? 'Aug2-Sunday-OK' : 'Aug2-NOT-Sunday',
+          },
         };
       });
     };
