@@ -362,11 +362,21 @@ const initializeDatabase = async () => {
 
 // Email configuration
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: Number(process.env.EMAIL_PORT || 587),
+  secure: process.env.EMAIL_SECURE === 'true' || process.env.EMAIL_SECURE === '1',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
   },
+});
+
+transporter.verify((err) => {
+  if (err) {
+    console.error('[MAIL] Transport verification failed:', err.message);
+  } else {
+    console.log('[MAIL] Transport verified successfully');
+  }
 });
 
 const ADMIN_EMAILS = ['allfriendsavhire@gmail.com', 'kaihardge@gmail.com'];
@@ -929,7 +939,7 @@ app.post('/api/bookings', async (req, res) => {
       `,
     };
 
-    transporter.sendMail(userMailOptions, (err, info) => {
+    transporter.sendMail(userMailOptions, (err) => {
       if (err) {
         console.error('Error sending user email:', err.message);
       } else {
@@ -982,7 +992,7 @@ app.post('/api/bookings', async (req, res) => {
       `,
     };
 
-    transporter.sendMail(adminMailOptions, (err, info) => {
+    transporter.sendMail(adminMailOptions, (err) => {
       if (err) {
         console.error('Error sending admin email:', err.message);
       } else {
