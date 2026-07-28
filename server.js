@@ -1592,15 +1592,6 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
 
     const unavailableLabelDebug = unavailableLabels.unavailableLabels || [];
 
-    // Debug: show August page data if available
-    const augustPageData = pageData.length > 1 ? pageData[1] : null;
-    console.log('[APPT_SYNC] August page collected:', {
-      hasAugustData: !!augustPageData,
-      augustGridCellCount: augustPageData?.gridCellCount,
-      augustUnavailableCount: augustPageData?.unavailableLabels?.length,
-      augustLabels: augustPageData?.unavailableLabels?.slice(0, 20),
-    });
-
     const parseLabelToDate = (label, currentMonthYearText) => {
       if (!label) return null;
       const cleaned = label.replace(/today|tomorrow|yesterday|no available times|no available time|no available slots|no availability|unavailable|not available/gi, '').trim();
