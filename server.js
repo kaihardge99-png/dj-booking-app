@@ -1622,13 +1622,14 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       }
     }
 
-    // Don't deduplicate with Set - just concatenate
-    // Set deduplication is losing data because labels might be identical across pages
+    // IMPORTANT: Only use the next month data for unavailable labels!
+    // The initial July page shows incorrect August dates (wrong year/month context)
+    // Only the August page (after clicking Next) shows correct dates
     const unavailableLabels = {
-      allLabels: [...(initialPageData.allLabels || []), ...(nextMonthData?.allLabels || [])],
-      unavailableLabels: [...(initialPageData.unavailableLabels || []), ...(nextMonthData?.unavailableLabels || [])],
-      buttonCount: initialPageData.buttonCount + (nextMonthData?.buttonCount || 0),
-      monthBreakdown: nextMonthData?.monthBreakdown,  // Use next month breakdown since that's where the issue is
+      allLabels: nextMonthData?.allLabels || [],
+      unavailableLabels: nextMonthData?.unavailableLabels || [],
+      buttonCount: nextMonthData?.buttonCount || 0,
+      monthBreakdown: nextMonthData?.monthBreakdown,
     };
     
     const monthYearText = initialMonthYearText ? (nextMonthText ? `${initialMonthYearText}, ${nextMonthText}` : initialMonthYearText) : nextMonthText;
