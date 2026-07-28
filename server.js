@@ -1527,7 +1527,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
       };
     });
 
-    async function collectUnavailableLabels() {
+    const collectUnavailableLabels = async () => {
       return await page.evaluate(() => {
         const labels = new Set();
         // Only collect labels from actual grid cells (calendar days), not from time slot buttons
@@ -1535,6 +1535,7 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
         const allButtons = Array.from(document.querySelectorAll('button[aria-label]'));
         const allGridLabels = gridCells.map(b => b.getAttribute('aria-label'));
         
+        // First try aria-labels
         gridCells.forEach((button) => {
           const aria = button.getAttribute('aria-label');
           if (!aria) return;
@@ -1543,6 +1544,32 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
             labels.add(aria);
           }
         });
+        
+        // If we didn't find enough labels via aria, try alternative: check for disabled state or styling
+        if (labels.size < 5) {
+          // Try to find cells with specific styling or disabled state that indicates unavailability
+          const allCells = Array.from(document.querySelectorAll('button[data-grid-cell="true"]'));
+          allCells.forEach((cell) => {
+            const aria = cell.getAttribute('aria-label');
+            if (!aria) return;
+            
+            // Check computed styles or attributes that might indicate unavailability
+            const style = window.getComputedStyle(cell);
+            const opacity = style.opacity;
+            const color = style.color;
+            
+            // Also check for aria-disabled, disabled attribute
+            const isDisabled = cell.hasAttribute('disabled') || cell.getAttribute('aria-disabled') === 'true';
+            
+            // If aria-label doesn't say "no available" but cell has styling suggesting unavailability, add it
+            if (!aria.toLowerCase().includes('no available') && !aria.toLowerCase().includes('available') && (isDisabled || opacity < 0.8)) {
+              // Try to parse the label to see if it's a date
+              if (aria.match(/^\d{1,2},/) || aria.includes(',')) {
+                labels.add(aria + ', unavailable');
+              }
+            }
+          });
+        }
         
         // Count by pattern to debug
         const augustLabels = allGridLabels.filter(l => l && (l.includes('August') || l.match(/^[1-9]\d{0,1},\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/)));
