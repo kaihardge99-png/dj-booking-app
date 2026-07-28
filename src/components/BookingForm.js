@@ -1,16 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './BookingForm.css';
 import Calendar from './Calendar';
-
-const OPERATING_HOURS = {
-  0: null, // Sunday - closed
-  1: { open: 10, close: 17 }, // Monday
-  2: { open: 10, close: 17 }, // Tuesday
-  3: { open: 10, close: 17 }, // Wednesday
-  4: { open: 10, close: 22 }, // Thursday
-  5: { open: 10, close: 22 }, // Friday
-  6: { open: 10, close: 17 }, // Saturday
-};
+import { getOperatingHoursForDate, getWeeklyOpeningHours, getOperatingHoursLabel } from '../operatingHours';
 
 const PRICING = {
   package1: 50,
@@ -131,8 +122,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
 
     // Check operating hours
     const bookingDate = new Date(formData.booking_date);
-    const dayOfWeek = bookingDate.getDay();
-    const hours = OPERATING_HOURS[dayOfWeek];
+    const hours = getOperatingHoursForDate(formData.booking_date);
 
     if (!hours) {
       newErrors.booking_date = 'We are closed on Sundays';
@@ -141,7 +131,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       const [endHour] = formData.end_time.split(':').map(Number);
 
       if (startHour < hours.open || endHour > hours.close) {
-        newErrors.start_time = `Operating hours: ${hours.open}:00 - ${hours.close}:00`;
+        newErrors.start_time = `Operating hours: ${getOperatingHoursLabel(hours)}`;
       }
     }
 
@@ -290,6 +280,7 @@ function BookingForm({ blockedDates, isUserLoggedIn, onAuthRequired, username, u
       {/* Booking Form */}
       <div className="form-card">
         <h2>Complete Your Booking</h2>
+        <p style={{ color: '#666', marginBottom: '12px' }}>{getWeeklyOpeningHours()}</p>
 
         {submitError && <div className="form-error">{submitError}</div>}
 

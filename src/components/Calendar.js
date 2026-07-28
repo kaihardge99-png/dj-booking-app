@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './Calendar.css';
+import { getOperatingHoursForDate, getWeeklyOpeningHours } from '../operatingHours';
 
 function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, selectedDate, selectedTime, selectedEndTime, availabilityVersion }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -10,15 +11,6 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
   const [apiPartialBlockedSegments, setApiPartialBlockedSegments] = useState([]);
   const [maxBookingDays, setMaxBookingDays] = useState(30);
 
-  const OPERATING_HOURS = {
-    0: null, // Sunday - closed
-    1: { open: 10, close: 17 }, // Monday
-    2: { open: 10, close: 17 }, // Tuesday
-    3: { open: 10, close: 17 }, // Wednesday
-    4: { open: 10, close: 22 }, // Thursday
-    5: { open: 10, close: 22 }, // Friday
-    6: { open: 10, close: 17 }, // Saturday
-  };
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -67,9 +59,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
       return;
     }
 
-    const date = new Date(selectedDate);
-    const dayOfWeek = date.getDay();
-    const hours = OPERATING_HOURS[dayOfWeek];
+    const hours = getOperatingHoursForDate(selectedDate);
 
     if (!hours) {
       setAvailableTimes([]);
@@ -108,8 +98,8 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
 
   const isDateClosed = (day) => {
     const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
-    const dayOfWeek = date.getDay();
-    return OPERATING_HOURS[dayOfWeek] === null;
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return getOperatingHoursForDate(dateStr) === null;
   };
 
   const isPastDate = (day) => {
@@ -134,6 +124,19 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
     onDateSelect(dateStr);
   };
 
+  const getEligibleEndTimes = () => {
+    if (!selectedTime) return [];
+    return availableTimes.filter((time) => {
+      const [startHour, startMin] = selectedTime.split(':').map(Number);
+      const [endHour, endMin] = time.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      const durationHours = (endMinutes - startMinutes) / 60;
+      return durationHours >= 2;
+    });
+  };
+
+  const eligibleEndTimes = getEligibleEndTimes();
   const daysInMonth = getDaysInMonth(currentMonth);
   const firstDay = getFirstDayOfMonth(currentMonth);
   const days = [];
@@ -156,7 +159,7 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
         <div className="calendar-header">
           <h3>Select Date & Time</h3>
           <p className="calendar-connected">
-            Availability is based on app schedule and blocked dates.
+            {getWeeklyOpeningHours()}
           </p>
         </div>
 
@@ -246,28 +249,29 @@ function Calendar({ blockedDates, onDateSelect, onTimeSelect, onEndTimeSelect, s
             {selectedTime && (
               <div className="end-time-selection">
                 <h4>Select End Time (Minimum 2 hours)</h4>
-                <div className="time-slots">
-                  {availableTimes.map((time) => {
-                    const [startHour, startMin] = selectedTime.split(':').map(Number);
-                    const [endHour, endMin] = time.split(':').map(Number);
-                    const startMinutes = startHour * 60 + startMin;
-                    const endMinutes = endHour * 60 + endMin;
-                    const durationHours = (endMinutes - startMinutes) / 60;
+                {eligibleEndTimes.length > 0 ? (
+                  <div className="time-slots">
+                    {eligibleEndTimes.map((time) => {
+                      const [startHour, startMin] = selectedTime.split(':').map(Number);
+                      const [endHour, endMin] = time.split(':').map(Number);
+                      const startMinutes = startHour * 60 + startMin;
+                      const endMinutes = endHour * 60 + endMin;
+                      const durationHours = (endMinutes - startMinutes) / 60;
 
-                    // Only show times that are at least 2 hours after start time
-                    if (durationHours < 2) return null;
-
-                    return (
-                      <button
-                        key={time}
-                        className={`time-slot end-time-slot ${selectedEndTime === time ? 'selected' : ''}`}
-                        onClick={() => onEndTimeSelect(time)}
-                      >
-                        {time} ({durationHours}h)
-                      </button>
-                    );
-                  })}
-                </div>
+                      return (
+                        <button
+                          key={time}
+                          className={`time-slot end-time-slot ${selectedEndTime === time ? 'selected' : ''}`}
+                          onClick={() => onEndTimeSelect(time)}
+                        >
+                          {time} ({durationHours}h)
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="no-times">No valid end times for a 2-hour booking from this start time.</p>
+                )}
               </div>
             )}
           </div>
