@@ -1580,9 +1580,15 @@ const fetchAndSyncAppointmentPage = async (pageUrl) => {
     const nextMonthButton = await page.$('button[aria-label="Next month"]');
     if (nextMonthButton) {
       await nextMonthButton.click();
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(8000);
       await page.waitForLoadState('networkidle').catch(() => null);
-      await waitForMonthLabels('August\\s+\\d{1,2}');
+      await page.waitForTimeout(3000);  // Extra time for grid to render
+      // Wait for ALL grid cells to load on the new month
+      await page.waitForFunction(
+        () => document.querySelectorAll('button[aria-label][data-grid-cell="true"]').length >= 35,
+        { timeout: 30000 }
+      ).catch(() => null);
+      await waitForMonthLabels('August\\s+\\d{1,2}|2,\\s*Sunday,\\s*no available times|4,\\s*Tuesday,\\s*no available times');
       nextMonthData = await collectUnavailableLabels();
       nextMonthText = await getMonthYearText();
     }
