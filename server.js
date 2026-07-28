@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { buildGoogleCalendarLink } = require('./src/googleCalendarLink');
 const { findUserByIdentifier } = require('./src/userAuth');
+const { getConfirmationEmailRecipients } = require('./src/emailRecipients');
 require('dotenv').config();
 
 const app = express();
@@ -884,10 +885,13 @@ app.post('/api/bookings', async (req, res) => {
       booking_username
     );
 
-    // Send confirmation email to user
+    const confirmationRecipients = getConfirmationEmailRecipients(user_email, ADMIN_EMAILS);
+
+    // Send confirmation email to user and copy the admin inboxes for testing
     const userMailOptions = {
       from: process.env.EMAIL_USER,
-      to: user_email,
+      to: confirmationRecipients.to,
+      cc: confirmationRecipients.cc,
       subject: 'Booking Confirmation - AllFriends AV DJ Practice Sessions',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
